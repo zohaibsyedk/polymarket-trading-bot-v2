@@ -96,33 +96,41 @@ def fetch_market(symbol: str, market_ts: int) -> Optional[ResolvedMarket]:
     if not m:
         return None
 
-    up, down = _parse_prices(m.get("outcomePrices"))
-    if up is None or down is None:
+    token_ids = _parse_token_ids(m.get("clobTokenIds"))
+    if len(token_ids) < 2:
         return None
 
-    token_ids = _parse_token_ids(m.get("clobTokenIds"))
-    ask_up = _best_ask_for_token(token_ids[0]) if len(token_ids) > 0 else None
-    ask_down = _best_ask_for_token(token_ids[1]) if len(token_ids) > 1 else None
-    bid_up = _best_bid_for_token(token_ids[0]) if len(token_ids) > 0 else None
-    bid_down = _best_bid_for_token(token_ids[1]) if len(token_ids) > 1 else None
+    ask_up = _best_ask_for_token(token_ids[0])
+    ask_down = _best_ask_for_token(token_ids[1])
+    bid_up = _best_bid_for_token(token_ids[0])
+    bid_down = _best_bid_for_token(token_ids[1])
 
     def valid_price(x):
         return x is not None and 0.0 < float(x) < 1.0
 
-    up_candidates = [float(up)]
-    down_candidates = [float(down)]
-    if valid_price(ask_up):
-        up_candidates.append(float(ask_up))
-    if valid_price(bid_up):
-        up_candidates.append(float(bid_up))
-    if valid_price(ask_down):
-        down_candidates.append(float(ask_down))
-    if valid_price(bid_down):
-        down_candidates.append(float(bid_down))
+    # CLOB-only: if no usable orderbook value exists, skip this market snapshot
+    if not any([valid_price(ask_up), valid_price(bid_up), valid_price(ask_down), valid_price(bid_down)]):
+        return None
 
-    # composite trigger price: most favorable observed tradable/display value
-    entry_up = min(up_candidates)
-    entry_down = min(down_candidates)
+    def clob_mark(ask, bid):
+        a = float(ask) if valid_price(ask) else None
+        b = float(bid) if valid_price(bid) else None
+        if a is not None and b is not None:
+            return (a + b) / 2.0
+        if a is not None:
+            return a
+        if b is not None:
+            return b
+        return None
+
+    up_mark = clob_mark(ask_up, bid_up)
+    down_mark = clob_mark(ask_down, bid_down)
+    if up_mark is None or down_mark is None:
+        return None
+
+    # Entry trigger should reflect buyable price; use ask when available
+    entry_up = float(ask_up) if valid_price(ask_up) else float(up_mark)
+    entry_down = float(ask_down) if valid_price(ask_down) else float(down_mark)
 
     return ResolvedMarket(
         symbol=symbol,
@@ -130,14 +138,14 @@ def fetch_market(symbol: str, market_ts: int) -> Optional[ResolvedMarket]:
         slug=slug,
         accepting_orders=bool(m.get("acceptingOrders")),
         closed=bool(m.get("closed")),
-        up_price=float(up),
-        down_price=float(down),
-        entry_up_price=entry_up,
-        entry_down_price=entry_down,
-        bid_up_price=bid_up,
-        bid_down_price=bid_down,
-        ask_up_price=ask_up,
-        ask_down_price=ask_down,
+        up_price=float(up_mark),
+        down_price=float(down_mark),
+        entry_up_price=float(entry_up),
+        entry_down_price=float(entry_down),
+        bid_up_price=float(bid_up) if valid_price(bid_up) else None,
+        bid_down_price=float(bid_down) if valid_price(bid_down) else None,
+        ask_up_price=float(ask_up) if valid_price(ask_up) else None,
+        ask_down_price=float(ask_down) if valid_price(ask_down) else None,
     )
 
 
