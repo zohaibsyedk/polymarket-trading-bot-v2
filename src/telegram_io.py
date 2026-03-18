@@ -18,16 +18,19 @@ class TelegramIO:
     def _url(self, method: str) -> str:
         return f"https://api.telegram.org/bot{self.token}/{method}"
 
-    def send(self, text: str, chat_id: str | None = None) -> None:
+    def send(self, text: str, chat_id: str | None = None) -> bool:
         if not self.enabled:
-            return
+            return False
         target = chat_id or self.default_chat_id
         if not target:
-            return
+            return False
         payload = urllib.parse.urlencode({"chat_id": target, "text": text})
         req = urllib.request.Request(self._url("sendMessage"), data=payload.encode("utf-8"))
-        with urllib.request.urlopen(req, timeout=10) as _:
-            pass
+        try:
+            with urllib.request.urlopen(req, timeout=10) as _:
+                return True
+        except Exception:
+            return False
 
     def poll_commands(self) -> List[Tuple[str, str]]:
         """Returns list of (chat_id, text)."""
@@ -39,8 +42,11 @@ class TelegramIO:
             "allowed_updates": json.dumps(["message"]),
         }
         url = self._url("getUpdates") + "?" + urllib.parse.urlencode(params)
-        with urllib.request.urlopen(url, timeout=max(10, self.poll_timeout_s + 2)) as r:
-            body = json.loads(r.read().decode("utf-8"))
+        try:
+            with urllib.request.urlopen(url, timeout=max(10, self.poll_timeout_s + 2)) as r:
+                body = json.loads(r.read().decode("utf-8"))
+        except Exception:
+            return []
         out: List[Tuple[str, str]] = []
         for upd in body.get("result", []):
             self.offset = max(self.offset, int(upd.get("update_id", 0)) + 1)
