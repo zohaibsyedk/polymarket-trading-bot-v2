@@ -5,7 +5,7 @@ Paper-trading simulation bot for BTC/ETH 5-minute Polymarket up/down markets.
 ## Current Status
 M1 + M2 implemented:
 - paper portfolio accounting
-- entry/exit rule engine
+- final-80s entry + settlement-at-close rule engine
 - trade/event/state logging
 - Telegram command wiring (`Log`, `Stop`)
 - live market discovery + quote fetch from Polymarket Gamma API for BTC/ETH 5m markets

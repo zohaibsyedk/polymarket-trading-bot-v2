@@ -3,12 +3,12 @@ from .config import BotConfig
 from .market_discovery import current_5m_window
 from .paper_engine import PortfolioState
 from .models import QuoteSnapshot
-from .strategy import evaluate_entry, evaluate_exit
+from .strategy import evaluate_entry
 from .notifier import format_entry_message, format_exit_message
 from .logging_io import append_jsonl, write_json
 from .telegram_commands import handle_command
 from .telegram_io import TelegramIO
-from .market_data import resolve_current_market, fetch_market
+from .market_data import resolve_current_market, resolve_settlement_payout
 
 
 def run() -> None:
@@ -32,7 +32,7 @@ def run() -> None:
     stop_requested = False
 
     if cfg.telegram_enabled and cfg.telegram_bot_token:
-        send("[PolyMarket Trading Bot V2]\n[Status: Started]\n[Commands: Log, Stop]")
+        send("[PolyMarket Trading Bot V2]\n[Status: Started]\n[Commands: Log, Market, Snapshot, Stop]")
 
     while not stop_requested:
         now_ts = int(time.time())
@@ -124,42 +124,20 @@ def run() -> None:
                     "slug": market.slug,
                 })
 
-        # EXIT decisions for all open positions (including older bucket if still open)
+        # EXIT at market close settlement only: payout is 1.0 for winner, 0.0 for loser
         for p in list(portfolio.open_positions.values()):
-            elapsed_for_pos = now_ts - p.market_ts
-            m = fetch_market(p.symbol, p.market_ts)
-            if not m:
-                # if unavailable and we're beyond market end, force close pessimistically at 0
-                if elapsed_for_pos >= cfg.market_interval_seconds:
-                    closed = portfolio.close_position(p.position_id, 0.0, now_ts)
-                    send(format_exit_message(closed, portfolio))
-                    append_jsonl(trades_log, {
-                        "type": "exit",
-                        "ts": now_ts,
-                        "position": closed.to_dict(),
-                        "reason": "forced_no_quote_after_close",
-                    })
+            payout = resolve_settlement_payout(p.symbol, p.market_ts, p.side)
+            if payout is None:
                 continue
-
-            quote = QuoteSnapshot(
-                symbol=p.symbol,
-                market_ts=p.market_ts,
-                up_price=m.up_price,
-                down_price=m.down_price,
-                ts=now_ts,
-            )
-
-            exit_decision = evaluate_exit(cfg, p, quote, elapsed_for_pos)
-            if exit_decision.should_exit and exit_decision.price is not None:
-                closed = portfolio.close_position(p.position_id, exit_decision.price, now_ts)
-                send(format_exit_message(closed, portfolio))
-                append_jsonl(trades_log, {
-                    "type": "exit",
-                    "ts": now_ts,
-                    "position": closed.to_dict(),
-                    "reason": exit_decision.reason,
-                    "slug": m.slug,
-                })
+            closed = portfolio.close_position(p.position_id, payout, now_ts)
+            send(format_exit_message(closed, portfolio))
+            append_jsonl(trades_log, {
+                "type": "exit",
+                "ts": now_ts,
+                "position": closed.to_dict(),
+                "reason": "market_settlement",
+                "payout_per_contract": payout,
+            })
 
         snapshot = {
             "ts": now_ts,

@@ -34,3 +34,10 @@
 - [x] One-command start script
 - [x] Clear README for setup/run/log access
 - [x] Troubleshooting guide for API/Telegram failures
+
+
+## M6 — Strategy Revision (Final 80s Momentum + Settlement)
+- [x] Entry only in final 80 seconds of each market
+- [x] Enter higher-priced side (UP vs DOWN)
+- [x] Remove intramarket TP/SL exits
+- [x] Exit only at market close with payout 1/0 per contract

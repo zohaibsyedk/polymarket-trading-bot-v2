@@ -184,3 +184,35 @@ def resolve_current_market(symbol: str, bucket_ts: int, now_ts: int) -> Optional
         return max(non_future, key=lambda m: m.market_ts)
 
     return min(resolved, key=lambda m: m.market_ts)
+
+
+def resolve_settlement_payout(symbol: str, market_ts: int, side: str) -> Optional[float]:
+    """
+    Returns payout per contract at/after market close:
+    - 1.0 if chosen side won
+    - 0.0 if chosen side lost
+    - None if market not yet resolved
+    """
+    slug = market_slug(symbol, market_ts)
+    m = _fetch_slug(slug)
+    if not m or not bool(m.get("closed")):
+        return None
+
+    up, down = _parse_prices(m.get("outcomePrices"))
+    if up is None or down is None:
+        return None
+
+    side_u = side.upper()
+    if side_u == "UP":
+        if up == 1.0:
+            return 1.0
+        if up == 0.0:
+            return 0.0
+    elif side_u == "DOWN":
+        if down == 1.0:
+            return 1.0
+        if down == 0.0:
+            return 0.0
+
+    # unresolved/ambiguous settlement state
+    return None
