@@ -84,8 +84,8 @@ def run() -> None:
             quote = QuoteSnapshot(
                 symbol=symbol,
                 market_ts=market.market_ts,
-                up_price=market.up_price,
-                down_price=market.down_price,
+                up_price=market.entry_up_price,
+                down_price=market.entry_down_price,
                 ts=now_ts,
             )
 
@@ -152,7 +152,7 @@ def run() -> None:
         append_jsonl(events_log, {
             "type": "tick",
             "ts": now_ts,
-            "active": {k: {"ts": v.market_ts, "slug": v.slug, "up": v.up_price, "down": v.down_price} for k, v in active.items()},
+            "active": {k: {"ts": v.market_ts, "slug": v.slug, "up": v.up_price, "down": v.down_price, "entry_up": v.entry_up_price, "entry_down": v.entry_down_price} for k, v in active.items()},
             "open_positions": len(portfolio.open_positions),
         })
 

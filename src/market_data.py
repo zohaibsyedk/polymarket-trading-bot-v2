@@ -5,6 +5,7 @@ from typing import Optional
 
 UA = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
 GAMMA_BASE = "https://gamma-api.polymarket.com/markets?slug="
+CLOB_BASE = "https://clob.polymarket.com"
 
 
 @dataclass
@@ -14,8 +15,10 @@ class ResolvedMarket:
     slug: str
     accepting_orders: bool
     closed: bool
-    up_price: float
-    down_price: float
+    up_price: float           # display/mark price (Gamma)
+    down_price: float         # display/mark price (Gamma)
+    entry_up_price: float     # entry trigger price (prefer CLOB ask)
+    entry_down_price: float   # entry trigger price (prefer CLOB ask)
 
 
 def _fetch_slug(slug: str) -> Optional[dict]:
@@ -39,6 +42,30 @@ def _parse_prices(v) -> tuple[Optional[float], Optional[float]]:
         return None, None
 
 
+def _best_ask_for_token(token_id: str) -> Optional[float]:
+    try:
+        req = urllib.request.Request(f"{CLOB_BASE}/book?token_id={token_id}", headers=UA)
+        with urllib.request.urlopen(req, timeout=8) as r:
+            d = json.loads(r.read().decode())
+        asks = d.get("asks") or []
+        if not asks:
+            return None
+        return float(asks[0].get("price"))
+    except Exception:
+        return None
+
+
+def _parse_token_ids(v) -> list[str]:
+    if isinstance(v, str):
+        try:
+            v = json.loads(v)
+        except Exception:
+            return []
+    if not isinstance(v, list):
+        return []
+    return [str(x) for x in v]
+
+
 def market_slug(symbol: str, market_ts: int) -> str:
     s = symbol.lower()
     if s not in {"btc", "eth"}:
@@ -56,6 +83,15 @@ def fetch_market(symbol: str, market_ts: int) -> Optional[ResolvedMarket]:
     if up is None or down is None:
         return None
 
+    token_ids = _parse_token_ids(m.get("clobTokenIds"))
+    ask_up = _best_ask_for_token(token_ids[0]) if len(token_ids) > 0 else None
+    ask_down = _best_ask_for_token(token_ids[1]) if len(token_ids) > 1 else None
+
+    # Use the lower of market display price and orderbook ask for trigger checks.
+    # This prevents stale/placeholder high asks (e.g. 0.99) from masking true dips.
+    entry_up = min(float(up), float(ask_up)) if ask_up is not None else float(up)
+    entry_down = min(float(down), float(ask_down)) if ask_down is not None else float(down)
+
     return ResolvedMarket(
         symbol=symbol,
         market_ts=market_ts,
@@ -64,6 +100,8 @@ def fetch_market(symbol: str, market_ts: int) -> Optional[ResolvedMarket]:
         closed=bool(m.get("closed")),
         up_price=float(up),
         down_price=float(down),
+        entry_up_price=entry_up,
+        entry_down_price=entry_down,
     )
 
 
@@ -89,8 +127,6 @@ def resolve_current_market(symbol: str, bucket_ts: int, now_ts: int) -> Optional
 
     non_future = [m for m in resolved if m.market_ts <= now_ts]
     if non_future:
-        # most recent active non-future market
         return max(non_future, key=lambda m: m.market_ts)
 
-    # fallback: if everything is future (edge API timing), pick nearest future
     return min(resolved, key=lambda m: m.market_ts)
