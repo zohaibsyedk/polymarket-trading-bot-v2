@@ -8,7 +8,7 @@ from .notifier import format_entry_message, format_exit_message
 from .logging_io import append_jsonl, write_json
 from .telegram_commands import handle_command
 from .telegram_io import TelegramIO
-from .market_data import resolve_current_market, resolve_settlement_payout
+from .market_data import resolve_current_market, resolve_settlement_payout, fetch_market
 
 
 def run() -> None:
@@ -124,8 +124,27 @@ def run() -> None:
                     "slug": market.slug,
                 })
 
-        # EXIT at market close settlement only: payout is 1.0 for winner, 0.0 for loser
+        # EXIT rules:
+        # 1) Stop-loss before close: if side price <= 0.60 and there is sell-side liquidity, exit.
+        # 2) Otherwise hold to settlement and payout at close (1/0).
         for p in list(portfolio.open_positions.values()):
+            m = fetch_market(p.symbol, p.market_ts)
+            if m is not None:
+                side_price = m.up_price if p.side == "UP" else m.down_price
+                side_liquidity_px = m.bid_up_price if p.side == "UP" else m.bid_down_price
+                if side_price <= cfg.stop_loss_price and side_liquidity_px is not None and side_liquidity_px > 0:
+                    closed = portfolio.close_position(p.position_id, side_liquidity_px, now_ts)
+                    send(format_exit_message(closed, portfolio))
+                    append_jsonl(trades_log, {
+                        "type": "exit",
+                        "ts": now_ts,
+                        "position": closed.to_dict(),
+                        "reason": "stop_loss_0.60_with_liquidity",
+                        "market_price": side_price,
+                        "executed_price": side_liquidity_px,
+                    })
+                    continue
+
             payout = resolve_settlement_payout(p.symbol, p.market_ts, p.side)
             if payout is None:
                 continue
