@@ -54,7 +54,7 @@ def run() -> None:
         # Resolve most current market per symbol
         active = {}
         for symbol in ("BTC", "ETH"):
-            market = resolve_current_market(symbol, window.ts_bucket)
+            market = resolve_current_market(symbol, window.ts_bucket, now_ts)
             if market:
                 active[symbol] = market
             else:
@@ -64,7 +64,11 @@ def run() -> None:
         for symbol, market in active.items():
             elapsed = now_ts - market.market_ts
             if elapsed < 0:
-                # market timestamp is in near future; skip until active
+                append_jsonl(events_log, {"type": "skip_future_market", "ts": now_ts, "symbol": symbol, "market_ts": market.market_ts})
+                continue
+
+            if not market.accepting_orders:
+                append_jsonl(events_log, {"type": "skip_not_accepting_orders", "ts": now_ts, "symbol": symbol, "slug": market.slug})
                 continue
 
             symbol_open = [

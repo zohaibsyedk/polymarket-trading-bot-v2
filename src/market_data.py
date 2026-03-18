@@ -67,22 +67,30 @@ def fetch_market(symbol: str, market_ts: int) -> Optional[ResolvedMarket]:
     )
 
 
-def resolve_current_market(symbol: str, bucket_ts: int) -> Optional[ResolvedMarket]:
+def resolve_current_market(symbol: str, bucket_ts: int, now_ts: int) -> Optional[ResolvedMarket]:
     """
-    Resolve the most current tradable market around this 5m bucket.
-    Preference: current bucket, then next bucket, then previous.
+    Resolve the *active* 5-minute market for the current time.
+
+    We prefer non-future buckets (<= now_ts). This avoids selecting the next
+    interval too early, which can suppress valid entries in the current market.
     """
-    candidates = [bucket_ts, bucket_ts + 300, bucket_ts - 300]
-    best: Optional[ResolvedMarket] = None
+    candidates = [bucket_ts, bucket_ts - 300, bucket_ts + 300]
+    resolved: list[ResolvedMarket] = []
     for ts in candidates:
         m = fetch_market(symbol, ts)
         if not m:
             continue
         if m.closed:
             continue
-        if best is None:
-            best = m
-            continue
-        if m.market_ts > best.market_ts:
-            best = m
-    return best
+        resolved.append(m)
+
+    if not resolved:
+        return None
+
+    non_future = [m for m in resolved if m.market_ts <= now_ts]
+    if non_future:
+        # most recent active non-future market
+        return max(non_future, key=lambda m: m.market_ts)
+
+    # fallback: if everything is future (edge API timing), pick nearest future
+    return min(resolved, key=lambda m: m.market_ts)
