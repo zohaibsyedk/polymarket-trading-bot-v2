@@ -1,4 +1,23 @@
+# Python
 __pycache__/
 *.pyc
+.venv/
+venv/
+
+# Runtime outputs
 logs/*.jsonl
 state/*.json
+
+# Secrets / local env
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+secrets/
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
