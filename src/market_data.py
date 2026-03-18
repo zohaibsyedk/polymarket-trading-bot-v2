@@ -72,25 +72,13 @@ def _best_bid_for_token(token_id: str) -> Optional[float]:
         return None
 
 
-def _midpoint_for_token(token_id: str) -> Optional[float]:
+def _market_price_for_token(token_id: str, side: str) -> Optional[float]:
+    """Use CLOB Get Market Price endpoint (/price). side in {BUY, SELL}."""
     try:
-        req = urllib.request.Request(f"{CLOB_BASE}/midpoint?token_id={token_id}", headers=UA)
-        with urllib.request.urlopen(req, timeout=8) as r:
-            d = json.loads(r.read().decode())
-        mid = d.get("mid")
-        if mid is None:
-            return None
-        v = float(mid)
-        if 0.0 < v < 1.0:
-            return v
-        return None
-    except Exception:
-        return None
-
-
-def _last_trade_price_for_token(token_id: str) -> Optional[float]:
-    try:
-        req = urllib.request.Request(f"{CLOB_BASE}/last-trade-price?token_id={token_id}", headers=UA)
+        req = urllib.request.Request(
+            f"{CLOB_BASE}/price?token_id={token_id}&side={side}",
+            headers=UA,
+        )
         with urllib.request.urlopen(req, timeout=8) as r:
             d = json.loads(r.read().decode())
         px = d.get("price")
@@ -132,37 +120,27 @@ def fetch_market(symbol: str, market_ts: int) -> Optional[ResolvedMarket]:
     if len(token_ids) < 2:
         return None
 
-    ask_up = _best_ask_for_token(token_ids[0])
-    ask_down = _best_ask_for_token(token_ids[1])
-    bid_up = _best_bid_for_token(token_ids[0])
-    bid_down = _best_bid_for_token(token_ids[1])
-    mid_up = _midpoint_for_token(token_ids[0])
-    mid_down = _midpoint_for_token(token_ids[1])
-    last_up = _last_trade_price_for_token(token_ids[0])
-    last_down = _last_trade_price_for_token(token_ids[1])
+    # CLOB Get Market Price endpoint prices (token IDs sourced from Gamma)
+    # side=SELL -> best ask (buyable)
+    # side=BUY  -> best bid (sellable)
+    sell_up = _market_price_for_token(token_ids[0], "SELL")
+    sell_down = _market_price_for_token(token_ids[1], "SELL")
+    buy_up = _market_price_for_token(token_ids[0], "BUY")
+    buy_down = _market_price_for_token(token_ids[1], "BUY")
 
     def valid_price(x):
         return x is not None and 0.0 < float(x) < 1.0
 
-    # CLOB Get Market Price endpoint first (midpoint), then last trade, then orderbook fallback
-    up_mark = mid_up if valid_price(mid_up) else (last_up if valid_price(last_up) else None)
-    down_mark = mid_down if valid_price(mid_down) else (last_down if valid_price(last_down) else None)
+    # Entry trigger should use buyable price (SELL side quote).
+    entry_up = float(sell_up) if valid_price(sell_up) else (float(buy_up) if valid_price(buy_up) else None)
+    entry_down = float(sell_down) if valid_price(sell_down) else (float(buy_down) if valid_price(buy_down) else None)
 
-    if up_mark is None:
-        a = float(ask_up) if valid_price(ask_up) else None
-        b = float(bid_up) if valid_price(bid_up) else None
-        up_mark = (a + b) / 2.0 if (a is not None and b is not None) else (a if a is not None else b)
-    if down_mark is None:
-        a = float(ask_down) if valid_price(ask_down) else None
-        b = float(bid_down) if valid_price(bid_down) else None
-        down_mark = (a + b) / 2.0 if (a is not None and b is not None) else (a if a is not None else b)
+    # Runtime mark/exit reference uses sellable price (BUY side quote).
+    up_mark = float(buy_up) if valid_price(buy_up) else (float(sell_up) if valid_price(sell_up) else None)
+    down_mark = float(buy_down) if valid_price(buy_down) else (float(sell_down) if valid_price(sell_down) else None)
 
-    if up_mark is None or down_mark is None:
+    if up_mark is None or down_mark is None or entry_up is None or entry_down is None:
         return None
-
-    # Entry trigger price: buyable ask if available; else use mark from Get Market Price path
-    entry_up = float(ask_up) if valid_price(ask_up) else float(up_mark)
-    entry_down = float(ask_down) if valid_price(ask_down) else float(down_mark)
 
     return ResolvedMarket(
         symbol=symbol,
@@ -174,10 +152,10 @@ def fetch_market(symbol: str, market_ts: int) -> Optional[ResolvedMarket]:
         down_price=float(down_mark),
         entry_up_price=float(entry_up),
         entry_down_price=float(entry_down),
-        bid_up_price=float(bid_up) if valid_price(bid_up) else None,
-        bid_down_price=float(bid_down) if valid_price(bid_down) else None,
-        ask_up_price=float(ask_up) if valid_price(ask_up) else None,
-        ask_down_price=float(ask_down) if valid_price(ask_down) else None,
+        bid_up_price=float(buy_up) if valid_price(buy_up) else None,
+        bid_down_price=float(buy_down) if valid_price(buy_down) else None,
+        ask_up_price=float(sell_up) if valid_price(sell_up) else None,
+        ask_down_price=float(sell_down) if valid_price(sell_down) else None,
     )
 
 
