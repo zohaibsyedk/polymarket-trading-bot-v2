@@ -125,22 +125,24 @@ def run() -> None:
                 })
 
         # EXIT rules:
-        # 1) Stop-loss before close: if side price <= 0.60 and there is sell-side liquidity, exit.
+        # 1) Stop-loss before close: if side price <= (entry_price * 0.88) and there is sell-side liquidity, exit.
         # 2) Otherwise hold to settlement and payout at close (1/0).
         for p in list(portfolio.open_positions.values()):
             m = fetch_market(p.symbol, p.market_ts)
             if m is not None:
                 side_price = m.up_price if p.side == "UP" else m.down_price
                 side_liquidity_px = m.bid_up_price if p.side == "UP" else m.bid_down_price
-                if side_price <= cfg.stop_loss_price and side_liquidity_px is not None and side_liquidity_px > 0:
+                stop_loss_price = round(p.entry_price * cfg.stop_loss_pct_of_entry, 6)
+                if side_price <= stop_loss_price and side_liquidity_px is not None and side_liquidity_px > 0:
                     closed = portfolio.close_position(p.position_id, side_liquidity_px, now_ts)
                     send(format_exit_message(closed, portfolio))
                     append_jsonl(trades_log, {
                         "type": "exit",
                         "ts": now_ts,
                         "position": closed.to_dict(),
-                        "reason": "stop_loss_0.60_with_liquidity",
+                        "reason": "stop_loss_88pct_of_entry_with_liquidity",
                         "market_price": side_price,
+                        "stop_loss_price": stop_loss_price,
                         "executed_price": side_liquidity_px,
                     })
                     continue

@@ -10,12 +10,12 @@ class BotConfig:
 
     market_interval_seconds: int = 300
     final_entry_window_seconds: int = 90
-    entry_min_price_threshold: float = 0.70
-    stop_loss_price: float = 0.60
+    entry_min_price_threshold: float = 0.77
+    stop_loss_pct_of_entry: float = 0.88
 
     min_cash_to_enter: float = 10.0
-    min_position_usd: float = 10.0
-    position_pct_cash: float = 0.03
+    min_position_usd: float = 50.0
+    position_pct_cash: float = 0.10
 
     workspace_root: Path = Path(__file__).resolve().parents[1]
     logs_dir: Path = workspace_root / "logs"

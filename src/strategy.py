@@ -27,7 +27,7 @@ def evaluate_entry(cfg: BotConfig, quote: QuoteSnapshot, elapsed_in_market_sec: 
     # New rule: in final window, only enter once any side reaches threshold.
     top = max(quote.up_price, quote.down_price)
     if top < cfg.entry_min_price_threshold:
-        return EntryDecision(False, reason="waiting_for_0.70_threshold")
+        return EntryDecision(False, reason="waiting_for_0.77_threshold")
 
     if quote.up_price >= quote.down_price:
         side = "UP"
