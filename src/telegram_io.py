@@ -10,6 +10,7 @@ class TelegramIO:
         self.default_chat_id = default_chat_id
         self.poll_timeout_s = poll_timeout_s
         self.offset = 0
+        self._primed = False
 
     @property
     def enabled(self) -> bool:
@@ -47,8 +48,18 @@ class TelegramIO:
                 body = json.loads(r.read().decode("utf-8"))
         except Exception:
             return []
+        updates = body.get("result", [])
+
+        # On fresh process start, skip backlog (including stale "Stop" commands)
+        # and only process commands that arrive after startup.
+        if not self._primed:
+            for upd in updates:
+                self.offset = max(self.offset, int(upd.get("update_id", 0)) + 1)
+            self._primed = True
+            return []
+
         out: List[Tuple[str, str]] = []
-        for upd in body.get("result", []):
+        for upd in updates:
             self.offset = max(self.offset, int(upd.get("update_id", 0)) + 1)
             msg = upd.get("message") or {}
             text = (msg.get("text") or "").strip()
