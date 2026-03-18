@@ -38,11 +38,18 @@ def run() -> None:
         now_ts = int(time.time())
         window = current_5m_window(now_ts)
 
+        # resolve market map first so command `Market` has current links
+        active = {}
+        for symbol in ("BTC", "ETH"):
+            market = resolve_current_market(symbol, window.ts_bucket, now_ts)
+            if market:
+                active[symbol] = market
+
         # Telegram command polling
         for chat_id, text in tg.poll_commands():
             if cfg.telegram_chat_id and chat_id != cfg.telegram_chat_id:
                 continue
-            resp, should_stop = handle_command(text, portfolio)
+            resp, should_stop = handle_command(text, portfolio, {k: v.slug for k, v in active.items()})
             tg.send(resp, chat_id=chat_id)
             append_jsonl(events_log, {"type": "command", "ts": now_ts, "chat_id": chat_id, "text": text, "stop": should_stop})
             if should_stop:
@@ -51,13 +58,9 @@ def run() -> None:
         if stop_requested:
             break
 
-        # Resolve most current market per symbol
-        active = {}
+        # Resolve most current market per symbol (already resolved for command handling)
         for symbol in ("BTC", "ETH"):
-            market = resolve_current_market(symbol, window.ts_bucket, now_ts)
-            if market:
-                active[symbol] = market
-            else:
+            if symbol not in active:
                 append_jsonl(events_log, {"type": "market_missing", "ts": now_ts, "symbol": symbol, "bucket": window.ts_bucket})
 
         # ENTRY decisions only on current active markets

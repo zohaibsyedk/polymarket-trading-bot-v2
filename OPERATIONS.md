@@ -12,6 +12,7 @@ cp .env.example .env
 ## Telegram Commands
 Send these to the bot chat:
 - `Log` → current open positions, realized P&L, cash, position value, portfolio value
+- `Market` → links to current BTC/ETH markets being watched
 - `Stop` → sends final log summary and gracefully stops process
 
 ## Logs
