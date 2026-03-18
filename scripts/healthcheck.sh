@@ -44,7 +44,7 @@ now=int(time.time())
 w=current_5m_window(now)
 print(f"- Time bucket: {w.ts_bucket}")
 for sym in ('BTC','ETH'):
-    m=resolve_current_market(sym, w.ts_bucket)
+    m=resolve_current_market(sym, w.ts_bucket, now)
     if not m:
         print(f"- {sym} market resolve: FAIL")
     else:
