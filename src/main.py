@@ -95,6 +95,24 @@ def run() -> None:
             )
 
             entry = evaluate_entry(cfg, quote, elapsed, portfolio.cash_available)
+            append_jsonl(events_log, {
+                "type": "entry_check",
+                "ts": now_ts,
+                "symbol": symbol,
+                "market_ts": market.market_ts,
+                "slug": market.slug,
+                "elapsed": elapsed,
+                "cash_available": portfolio.cash_available,
+                "up_trigger_price": quote.up_price,
+                "down_trigger_price": quote.down_price,
+                "decision": {
+                    "should_enter": entry.should_enter,
+                    "reason": entry.reason,
+                    "side": entry.side,
+                    "price": entry.price,
+                    "size_usd": entry.size_usd,
+                },
+            })
             if entry.should_enter and entry.side and entry.price and entry.size_usd:
                 p = portfolio.create_position(symbol, market.market_ts, entry.side, entry.price, now_ts, entry.size_usd)
                 send(format_entry_message(p, portfolio))
