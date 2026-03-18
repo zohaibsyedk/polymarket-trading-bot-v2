@@ -27,12 +27,35 @@ def build_market_summary(active_market_slug: dict[str, str]) -> str:
     return "\n".join(lines)
 
 
-def handle_command(cmd: str, portfolio: PortfolioState, active_market_slug: dict[str, str] | None = None) -> tuple[str, bool]:
+def build_snapshot_summary(active_market_data: dict[str, dict]) -> str:
+    lines = ["[PolyMarket Trading Bot V2 - Snapshot]"]
+    for sym in ("BTC", "ETH"):
+        d = active_market_data.get(sym) or {}
+        slug = d.get("slug")
+        up = d.get("up")
+        down = d.get("down")
+        if slug is None or up is None or down is None:
+            lines.append(f"[{sym}] (not resolved)")
+            continue
+        lines.append(f"[{sym} - {slug.rsplit('-', 1)[-1]}]")
+        lines.append(f"[UP: ${float(up):.4f}]")
+        lines.append(f"[DOWN: ${float(down):.4f}]")
+    return "\n".join(lines)
+
+
+def handle_command(
+    cmd: str,
+    portfolio: PortfolioState,
+    active_market_slug: dict[str, str] | None = None,
+    active_market_data: dict[str, dict] | None = None,
+) -> tuple[str, bool]:
     c = cmd.strip().lower()
     if c == "log":
         return build_log_summary(portfolio), False
     if c == "market":
         return build_market_summary(active_market_slug or {}), False
+    if c == "snapshot":
+        return build_snapshot_summary(active_market_data or {}), False
     if c == "stop":
         return build_log_summary(portfolio), True
-    return "Unknown command. Use Log, Market, or Stop.", False
+    return "Unknown command. Use Log, Market, Snapshot, or Stop.", False

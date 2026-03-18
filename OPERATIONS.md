@@ -13,6 +13,7 @@ cp .env.example .env
 Send these to the bot chat:
 - `Log` → current open positions, realized P&L, cash, position value, portfolio value
 - `Market` → links to current BTC/ETH markets being watched
+- `Snapshot` → current UP/DOWN prices for BTC and ETH watched markets
 - `Stop` → sends final log summary and gracefully stops process
 
 ## Logs

@@ -49,7 +49,12 @@ def run() -> None:
         for chat_id, text in tg.poll_commands():
             if cfg.telegram_chat_id and chat_id != cfg.telegram_chat_id:
                 continue
-            resp, should_stop = handle_command(text, portfolio, {k: v.slug for k, v in active.items()})
+            resp, should_stop = handle_command(
+                text,
+                portfolio,
+                {k: v.slug for k, v in active.items()},
+                {k: {"slug": v.slug, "up": v.up_price, "down": v.down_price} for k, v in active.items()},
+            )
             tg.send(resp, chat_id=chat_id)
             append_jsonl(events_log, {"type": "command", "ts": now_ts, "chat_id": chat_id, "text": text, "stop": should_stop})
             if should_stop:
