@@ -9,7 +9,8 @@ class BotConfig:
     poll_seconds: float = float(os.getenv("PMB2_POLL_SECONDS", "2"))
 
     market_interval_seconds: int = 300
-    final_entry_window_seconds: int = 80
+    final_entry_window_seconds: int = 90
+    entry_min_price_threshold: float = 0.70
 
     min_cash_to_enter: float = 10.0
     min_position_usd: float = 10.0

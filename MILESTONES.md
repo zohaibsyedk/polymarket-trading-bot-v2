@@ -37,7 +37,7 @@
 
 
 ## M6 — Strategy Revision (Final 80s Momentum + Settlement)
-- [x] Entry only in final 80 seconds of each market
+- [x] Entry only in final 90 seconds of each market, and only after a side reaches >= $0.70
 - [x] Enter higher-priced side (UP vs DOWN)
 - [x] Remove intramarket TP/SL exits
 - [x] Exit only at market close with payout 1/0 per contract
