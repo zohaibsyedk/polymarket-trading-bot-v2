@@ -18,8 +18,8 @@ class BotConfig:
     position_pct_cash: float = 0.10
 
     workspace_root: Path = Path(__file__).resolve().parents[1]
-    logs_dir: Path = workspace_root / "logs"
-    state_dir: Path = workspace_root / "state"
+    logs_dir: Path = Path(os.getenv("PMB2_LOGS_DIR", str(workspace_root / "logs")))
+    state_dir: Path = Path(os.getenv("PMB2_STATE_DIR", str(workspace_root / "state")))
 
     # Telegram runtime controls
     telegram_enabled: bool = os.getenv("PMB2_TELEGRAM_ENABLED", "0") == "1"
