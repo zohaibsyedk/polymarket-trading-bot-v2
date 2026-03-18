@@ -17,8 +17,12 @@ class ResolvedMarket:
     closed: bool
     up_price: float           # display/mark price (Gamma)
     down_price: float         # display/mark price (Gamma)
-    entry_up_price: float     # entry trigger price (prefer CLOB ask)
-    entry_down_price: float   # entry trigger price (prefer CLOB ask)
+    entry_up_price: float     # composite trigger price
+    entry_down_price: float   # composite trigger price
+    bid_up_price: Optional[float]
+    bid_down_price: Optional[float]
+    ask_up_price: Optional[float]
+    ask_down_price: Optional[float]
 
 
 def _fetch_slug(slug: str) -> Optional[dict]:
@@ -55,6 +59,19 @@ def _best_ask_for_token(token_id: str) -> Optional[float]:
         return None
 
 
+def _best_bid_for_token(token_id: str) -> Optional[float]:
+    try:
+        req = urllib.request.Request(f"{CLOB_BASE}/book?token_id={token_id}", headers=UA)
+        with urllib.request.urlopen(req, timeout=8) as r:
+            d = json.loads(r.read().decode())
+        bids = d.get("bids") or []
+        if not bids:
+            return None
+        return float(bids[0].get("price"))
+    except Exception:
+        return None
+
+
 def _parse_token_ids(v) -> list[str]:
     if isinstance(v, str):
         try:
@@ -86,11 +103,26 @@ def fetch_market(symbol: str, market_ts: int) -> Optional[ResolvedMarket]:
     token_ids = _parse_token_ids(m.get("clobTokenIds"))
     ask_up = _best_ask_for_token(token_ids[0]) if len(token_ids) > 0 else None
     ask_down = _best_ask_for_token(token_ids[1]) if len(token_ids) > 1 else None
+    bid_up = _best_bid_for_token(token_ids[0]) if len(token_ids) > 0 else None
+    bid_down = _best_bid_for_token(token_ids[1]) if len(token_ids) > 1 else None
 
-    # Use the lower of market display price and orderbook ask for trigger checks.
-    # This prevents stale/placeholder high asks (e.g. 0.99) from masking true dips.
-    entry_up = min(float(up), float(ask_up)) if ask_up is not None else float(up)
-    entry_down = min(float(down), float(ask_down)) if ask_down is not None else float(down)
+    def valid_price(x):
+        return x is not None and 0.0 < float(x) < 1.0
+
+    up_candidates = [float(up)]
+    down_candidates = [float(down)]
+    if valid_price(ask_up):
+        up_candidates.append(float(ask_up))
+    if valid_price(bid_up):
+        up_candidates.append(float(bid_up))
+    if valid_price(ask_down):
+        down_candidates.append(float(ask_down))
+    if valid_price(bid_down):
+        down_candidates.append(float(bid_down))
+
+    # composite trigger price: most favorable observed tradable/display value
+    entry_up = min(up_candidates)
+    entry_down = min(down_candidates)
 
     return ResolvedMarket(
         symbol=symbol,
@@ -102,6 +134,10 @@ def fetch_market(symbol: str, market_ts: int) -> Optional[ResolvedMarket]:
         down_price=float(down),
         entry_up_price=entry_up,
         entry_down_price=entry_down,
+        bid_up_price=bid_up,
+        bid_down_price=bid_down,
+        ask_up_price=ask_up,
+        ask_down_price=ask_down,
     )
 
 

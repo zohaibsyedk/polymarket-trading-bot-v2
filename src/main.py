@@ -175,7 +175,7 @@ def run() -> None:
         append_jsonl(events_log, {
             "type": "tick",
             "ts": now_ts,
-            "active": {k: {"ts": v.market_ts, "slug": v.slug, "up": v.up_price, "down": v.down_price, "entry_up": v.entry_up_price, "entry_down": v.entry_down_price} for k, v in active.items()},
+            "active": {k: {"ts": v.market_ts, "slug": v.slug, "up": v.up_price, "down": v.down_price, "entry_up": v.entry_up_price, "entry_down": v.entry_down_price, "bid_up": v.bid_up_price, "ask_up": v.ask_up_price, "bid_down": v.bid_down_price, "ask_down": v.ask_down_price} for k, v in active.items()},
             "open_positions": len(portfolio.open_positions),
         })
 
