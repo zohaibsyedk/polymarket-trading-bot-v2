@@ -1,0 +1,74 @@
+PolyMarket Trading Bot V2
+We are starting a project called PolyMarket Trading Bot V2, it is very important that you remember everything we do for this project extensively. In the future we may have a new session but when I ask about PolyMarket Trading Bot V2 you should be able to access all this information. 
+Markets: 
+Bitcoin 5 minute markets
+https://polymarket.com/event/btc-updown-5m-[UNIX Time Stamp of 5 Minute Interval]
+Ex: https://polymarket.com/event/btc-updown-5m-1773806700 
+Ethereum 5 minute markets
+https://polymarket.com/event/eth-updown-5m-[UNIX Time stamp of 5 minute intervals]
+Ex: https://polymarket.com/event/eth-updown-5m-1773806700 
+Description of Markets:
+These markets open up at 5 minute intervals. 
+IMPORTANT: Make sure that as this bot is running, it is only working on the most current markets, and continues to update to the most current market as time passes.
+ 
+Strategy Overview:
+Metrics To Track:
+Amount of Cash Available:
+This is the account's disposable balance. When an entry is made, the price of the entry is subtracted from this. When an exit is made, the exit’s final value is added to this.
+Value of Open Positions: 
+This tracks the entry price for all active positions. When an entry is made, the cost is added to the value of open positions, and when an exit is made, the entry cost of the position is deducted from this amount.
+IMPORTANT: Entries can only be made with money in Amount of Cash Available. If there is less than $10 in the amount of cash available, entries cant be made. 
+Entry Rules:
+Only enter in the first 2 minutes of a 5 minute market.
+Each position is entered at whichever is higher
+3% of the Amount of Cash Available
+$10
+If either Up or Down Contracts hit $0.20, buy it
+Once an entry is made, send an entry message to my telegram based on guidelines in the Message Rules section below.
+Exit Rules:
+Rule Set 1: Only active from time of entry to the beginning of the last minute of the market.
+Take Profit: Exit if the price of the purchased contract rises to $0.40
+Take Loss: Exit if the price of the purchased contract falls to $0.10
+Rule Set 2: Active in the last minute of the market
+Exit position if it is still open
+Once an exit is made, send an exit message to my telegram based on guidelines in the Message Rules section below.
+Message Rules:
+Entry Message:
+1. Position ID - An id number for the position placed
+Format [ID: ______]
+2. Which market the position was taken in 
+Format [BTC - Time Stamp] / [ETH - Timestamp]
+3. Contract Purchased and purchase price
+Format [Purchase: UP @ $____ ] / [Purchase: DOWN @ $____ ]
+4. Total Position Price (Number of contracts * price per contract)
+Format [Position:  ___ Contracts for $_____]
+5. Amount of Cash Available
+Format [Cash Available: $____]
+6. Value of Open Positions
+Format [Position Value: $____]
+7. Portfolio Value (Value of open positions + Amount of Cash Available)
+Format [Portfolio Value: $____]
+Exit Message:
+1. Position ID - the same ID Number associated with the entry of the position
+Format [ID: ______]
+2. Which market the position was taken in 
+Format [BTC - Time Stamp] / [ETH - Timestamp]
+3. Contract Purchased and purchase price
+Format [Purchase: UP @ $____ ] / [Purchase: DOWN @ $____ ]
+4. Contract Sell Price
+Format [Sold: UP @ $____ ] / [Sold: DOWN @ $____ ]
+5. Net Profit Per Contract (Contract Sell Price - Contract Sold Price)
+Format [Net Profit Per Contract: $____]
+Include negative sign if loss, plus sign if gain
+5. Amount of Cash Available
+Format [Cash Available: $____]
+6. Value of Open Positions
+Format [Position Value: $____]
+7. Portfolio Value (Value of open positions + Amount of Cash Available)
+Format [Portfolio Value: $____]
+Build Guideline:
+Build a program that executes this strategy as a simulation. Paper trading. 
+Track each position in a log, and have it constantly updated with every trade, and tell me how I can access it.
+Build it with these telegram commands
+“Log” - Report how many open positions there are, total profit and loss, account balance
+“Stop” - Return a log, and stop the program.
