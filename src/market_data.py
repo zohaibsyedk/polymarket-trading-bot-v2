@@ -26,10 +26,13 @@ class ResolvedMarket:
 
 
 def _fetch_slug(slug: str) -> Optional[dict]:
-    req = urllib.request.Request(GAMMA_BASE + slug, headers=UA)
-    with urllib.request.urlopen(req, timeout=12) as r:
-        d = json.loads(r.read().decode())
-    return d[0] if d else None
+    try:
+        req = urllib.request.Request(GAMMA_BASE + slug, headers=UA)
+        with urllib.request.urlopen(req, timeout=12) as r:
+            d = json.loads(r.read().decode())
+        return d[0] if d else None
+    except Exception:
+        return None
 
 
 def _parse_prices(v) -> tuple[Optional[float], Optional[float]]:
