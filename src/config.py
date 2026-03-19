@@ -10,8 +10,8 @@ class BotConfig:
 
     market_interval_seconds: int = 300
     final_entry_window_seconds: int = 90
-    entry_min_price_threshold: float = 0.77
-    stop_loss_pct_of_entry: float = 0.88
+    entry_min_price_threshold: float = 0.75
+    stop_loss_pct_of_entry: float = 0.40
 
     min_cash_to_enter: float = 10.0
     min_position_usd: float = 50.0
