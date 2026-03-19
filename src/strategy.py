@@ -22,7 +22,7 @@ def evaluate_entry(cfg: BotConfig, quote: QuoteSnapshot, elapsed_in_market_sec: 
 
     entry_start = cfg.market_interval_seconds - cfg.final_entry_window_seconds
     if elapsed_in_market_sec < entry_start or elapsed_in_market_sec >= cfg.market_interval_seconds:
-        return EntryDecision(False, reason="outside_final_90s_window")
+        return EntryDecision(False, reason="outside_final_50s_window")
 
     # New rule: in final window, only enter once any side reaches threshold.
     top = max(quote.up_price, quote.down_price)
@@ -37,4 +37,4 @@ def evaluate_entry(cfg: BotConfig, quote: QuoteSnapshot, elapsed_in_market_sec: 
         px = quote.down_price
 
     size = compute_entry_size(cash_available, cfg)
-    return EntryDecision(True, side=side, price=px, size_usd=size, reason="final_90s_threshold_then_higher_side")
+    return EntryDecision(True, side=side, price=px, size_usd=size, reason="final_50s_threshold_then_higher_side")
