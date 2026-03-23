@@ -117,7 +117,16 @@ def run() -> None:
 
         # live-mode reconciliation checks
         if cfg.trading_mode == "live" and cfg.reconcile_enabled:
-            if (now_ts - last_reconcile_ts) >= max(5, cfg.reconcile_interval_s):
+            sec_in_market = now_ts % cfg.market_interval_seconds
+            in_final_entry_window = sec_in_market >= (cfg.market_interval_seconds - cfg.final_entry_window_seconds)
+            if in_final_entry_window:
+                append_jsonl(events_log, {
+                    "type": "reconcile_skipped_final_window",
+                    "ts": now_ts,
+                    "sec_in_market": sec_in_market,
+                    "final_entry_window_seconds": cfg.final_entry_window_seconds,
+                })
+            elif (now_ts - last_reconcile_ts) >= max(5, cfg.reconcile_interval_s):
                 last_reconcile_ts = now_ts
                 try:
                     acct = engine.get_account_state()
