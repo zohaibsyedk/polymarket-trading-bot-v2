@@ -65,9 +65,12 @@ POLYMARKET_FUNDER=0x...
 POLYMARKET_CHAIN_ID=137
 POLYMARKET_SIGNATURE_TYPE=2
 POLYMARKET_USE_DERIVED_CREDS=1
+# GTC|FAK|FOK|GTD (FAK behaves closest to market-style execution)
+POLYMARKET_LIVE_ORDER_TYPE=GTC
 ```
 
 > In live mode, orders are real.
+> If you want market-style execution with a protection limit, use `POLYMARKET_LIVE_ORDER_TYPE=FAK`.
 
 ---
 

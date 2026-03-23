@@ -222,6 +222,18 @@ def _wait_for_fill(client, order_id: str, requested_size: float) -> tuple[float,
     return 0.0, None, None
 
 
+def _resolve_order_type():
+    try:
+        from py_clob_client.clob_types import OrderType
+    except Exception as e:
+        raise RuntimeError("py-clob-client import mismatch; check installed version") from e
+
+    raw = os.getenv("POLYMARKET_LIVE_ORDER_TYPE", "GTC").strip().upper()
+    if raw not in {"GTC", "FAK", "FOK", "GTD"}:
+        raise RuntimeError("POLYMARKET_LIVE_ORDER_TYPE must be one of GTC|FAK|FOK|GTD")
+    return getattr(OrderType, raw)
+
+
 def _place_limit_buy(client, token_id: str, limit_price: float, size_usd: float) -> dict[str, Any]:
     try:
         from py_clob_client.clob_types import OrderArgs, OrderType
@@ -243,7 +255,7 @@ def _place_limit_buy(client, token_id: str, limit_price: float, size_usd: float)
         token_id=str(token_id),
     )
     signed = client.create_order(order)
-    resp = client.post_order(signed, OrderType.GTC)
+    resp = client.post_order(signed, _resolve_order_type())
     order_id = _extract_order_id(resp or {})
 
     if not order_id:
@@ -295,7 +307,7 @@ def _place_limit_sell(client, token_id: str, limit_price: float, contracts: floa
         token_id=str(token_id),
     )
     signed = client.create_order(order)
-    resp = client.post_order(signed, OrderType.GTC)
+    resp = client.post_order(signed, _resolve_order_type())
     order_id = _extract_order_id(resp or {})
 
     if not order_id:
