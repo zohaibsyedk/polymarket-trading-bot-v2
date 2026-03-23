@@ -1,6 +1,5 @@
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from .config import BotConfig
 from .market_discovery import current_5m_window
 from .paper_engine import PortfolioState
@@ -11,7 +10,8 @@ from .notifier import format_entry_message, format_exit_message
 from .logging_io import append_jsonl, write_json
 from .telegram_commands import handle_command
 from .telegram_io import TelegramIO
-from .market_data import resolve_current_market, resolve_settlement_payout, fetch_market
+from .market_data import resolve_settlement_payout, fetch_market
+from .market_feed import MarketFeed
 
 
 def run() -> None:
@@ -39,6 +39,14 @@ def run() -> None:
         )
     else:
         engine = PaperExecutionEngine()
+
+    market_feed = MarketFeed(
+        market_interval_seconds=cfg.market_interval_seconds,
+        poll_seconds=cfg.poll_seconds,
+        hot_poll_seconds=cfg.hot_poll_seconds,
+        final_entry_window_seconds=cfg.final_entry_window_seconds,
+    )
+    market_feed.start()
 
     def send(msg: str):
         print("\n--- BOT MESSAGE ---\n" + msg + "\n--- END ---\n")
@@ -231,17 +239,7 @@ def run() -> None:
 
         # resolve market map first so command `Market` has current links
         fetch_t0 = time.perf_counter()
-        active = {}
-        with ThreadPoolExecutor(max_workers=2) as ex:
-            futs = {ex.submit(resolve_current_market, symbol, window.ts_bucket, now_ts): symbol for symbol in ("BTC", "ETH")}
-            for fut in as_completed(futs):
-                symbol = futs[fut]
-                try:
-                    market = fut.result()
-                except Exception:
-                    market = None
-                if market:
-                    active[symbol] = market
+        active = market_feed.snapshot()
         append_jsonl(events_log, {
             "type": "latency_market_fetch",
             "ts": now_ts,
@@ -614,6 +612,7 @@ def run() -> None:
 
         time.sleep(max(0.1, float(sleep_s)))
 
+    market_feed.stop()
     final_msg = handle_command("log", portfolio, live_account=latest_live_account)[0] + "\n[Bot stopped]"
     send(final_msg)
     append_jsonl(events_log, {"type": "stopped", "ts": int(time.time())})

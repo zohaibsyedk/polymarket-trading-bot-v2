@@ -8,6 +8,8 @@ Implemented and runnable with:
 - Paper + live execution modes
 - Live CLOB bridge (`scripts/polymarket_clob_bridge.py`)
 - Optional fill polling (can be disabled for lower latency)
+- Separate background market-data feed loop (execution loop reads cached snapshot)
+- Optional websocket top-of-book overlay feed (`PMB2_WS_ENABLED=1`)
 - Auto-claim loop (live)
 - Live account reconciliation + entry pause on drift
 - Telegram control commands (`Log`, `Market`, `Snapshot`, `Poly`, `Status`, `Pause`, `Resume`, `Stop`)
@@ -84,9 +86,12 @@ PMB2_MIN_BUY_TRIGGER_PRICE=0.74
 PMB2_MIN_BUY_FILL_PRICE=0.74
 PMB2_PAUSE_ON_BUY_FILL_BELOW_MIN=1
 
-PMB2_HOT_POLL_SECONDS=1.0
-PMB2_PRE_ENTRY_POLL_SECONDS=3.0
+PMB2_HOT_POLL_SECONDS=0.5
 PMB2_BRIDGE_PERSISTENT=1
+PMB2_WS_ENABLED=0
+PMB2_WS_URL=wss://clob.polymarket.com/ws
+# optional for your WS protocol
+# PMB2_WS_SUBSCRIBE_PAYLOAD={"type":"subscribe","token_ids":{token_ids_json}}
 
 POLYMARKET_DISABLE_FILL_POLLING=0
 POLYMARKET_ORDER_POLL_TIMEOUT_S=8
