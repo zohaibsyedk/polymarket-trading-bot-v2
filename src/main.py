@@ -1,3 +1,4 @@
+import os
 import time
 from .config import BotConfig
 from .market_discovery import current_5m_window
