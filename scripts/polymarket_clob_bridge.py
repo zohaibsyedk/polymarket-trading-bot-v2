@@ -325,12 +325,21 @@ def _place_limit_sell(client, token_id: str, limit_price: float, contracts: floa
     }
 
 
+def _normalize_usdc_amount(v: float | None) -> float | None:
+    if v is None:
+        return None
+    # Balance allowance commonly returns USDC in 6-decimal base units.
+    if abs(v) > 1_000_000:
+        return float(v) / 1_000_000.0
+    return float(v)
+
+
 def _extract_cash_from_any(resp: Any) -> float | None:
     if isinstance(resp, dict):
         for k in ("cash", "cash_available", "available", "available_balance", "balance", "usdc", "collateral"):
             v = _to_f(resp.get(k))
             if v is not None:
-                return float(v)
+                return _normalize_usdc_amount(float(v))
         for k in ("data", "result", "account", "balances"):
             if k in resp:
                 v = _extract_cash_from_any(resp[k])
@@ -383,6 +392,24 @@ def _account_state(client) -> dict[str, Any]:
     cash = None
     portfolio_value = None
     positions: list[dict[str, Any]] = []
+
+    # Preferred cash source on py-clob-client: balance allowance (USDC collateral).
+    try:
+        from py_clob_client.clob_types import BalanceAllowanceParams, AssetType
+
+        if hasattr(client, "get_balance_allowance"):
+            resp = client.get_balance_allowance(
+                BalanceAllowanceParams(
+                    asset_type=AssetType.COLLATERAL,
+                    token_id="",
+                    signature_type=int(os.getenv("POLYMARKET_SIGNATURE_TYPE", "2")),
+                )
+            )
+            v = _extract_cash_from_any(resp)
+            if v is not None:
+                cash = round(float(v), 6)
+    except Exception:
+        pass
 
     # Try cash/balance/account methods
     for name in ("get_balance", "get_balances", "get_collateral", "get_account", "get_profile"):

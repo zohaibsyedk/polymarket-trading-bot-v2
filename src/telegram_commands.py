@@ -6,10 +6,11 @@ def build_log_summary(portfolio: PortfolioState, live_account: dict | None = Non
     live_cash = live.get("cash_available")
     live_portfolio = live.get("portfolio_value")
 
-    if live_cash is not None and live_portfolio is not None:
-        cash_f = float(live_cash)
-        port_f = float(live_portfolio)
+    if live_cash is not None or live_portfolio is not None:
+        cash_f = float(live_cash) if live_cash is not None else 0.0
+        port_f = float(live_portfolio) if live_portfolio is not None else cash_f
         pos_f = port_f - cash_f
+        note = "" if live_portfolio is not None else "\n[Note: Portfolio value unavailable from API; using cash-only estimate]"
         return (
             "[PolyMarket Trading Bot V2 - Log]\n"
             f"[Open Positions (Bot): {len(portfolio.open_positions)}]\n"
@@ -17,6 +18,7 @@ def build_log_summary(portfolio: PortfolioState, live_account: dict | None = Non
             f"[Cash Available: {cash_f:.4f}]\n"
             f"[Position Value: {pos_f:.4f}]\n"
             f"[Portfolio Value: {port_f:.4f}]"
+            f"{note}"
         )
 
     return (
@@ -79,16 +81,22 @@ def handle_command(
         acct = live_account or {}
         cash = acct.get("cash_available")
         portfolio_total = acct.get("portfolio_value")
-        if cash is None or portfolio_total is None:
+        if cash is None and portfolio_total is None:
             return "[Poly] Account totals unavailable yet. Wait for reconcile tick.", False, None
-        cash_f = float(cash)
-        port_f = float(portfolio_total)
+        cash_f = float(cash) if cash is not None else 0.0
+        if portfolio_total is None:
+            port_f = cash_f
+            note = "\n[Note: Portfolio value unavailable from API; using cash-only estimate]"
+        else:
+            port_f = float(portfolio_total)
+            note = ""
         pos_f = port_f - cash_f
         return (
             "[PolyMarket Account]\n"
             f"[Available Cash: ${cash_f:.4f}]\n"
             f"[Portfolio Value: ${port_f:.4f}]\n"
             f"[Position Value: ${pos_f:.4f}]"
+            f"{note}"
         ), False, None
     if c == "pause":
         if entries_paused:
