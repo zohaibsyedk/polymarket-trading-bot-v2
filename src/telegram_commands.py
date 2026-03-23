@@ -71,6 +71,13 @@ def handle_command(
     entries_paused: bool = False,
 ) -> tuple[str, bool, str | None]:
     c = cmd.strip().lower()
+    # Accept telegram-style commands like /poly or /poly@BotName
+    if c.startswith('/'):
+        c = c[1:]
+    if '@' in c:
+        c = c.split('@', 1)[0]
+    if ' ' in c:
+        c = c.split(' ', 1)[0]
     if c == "log":
         return build_log_summary(portfolio, live_account=live_account), False, None
     if c == "market":
