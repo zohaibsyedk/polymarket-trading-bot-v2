@@ -10,7 +10,7 @@ Implemented and runnable with:
 - Actual fill tracking via order polling
 - Auto-claim loop (live)
 - Live account reconciliation + entry pause on drift
-- Telegram control commands (`Log`, `Market`, `Snapshot`, `Poly`, `Pause`, `Resume`, `Stop`)
+- Telegram control commands (`Log`, `Market`, `Snapshot`, `Poly`, `Status`, `Pause`, `Resume`, `Stop`)
 - Per-run archived logs/state via `run.sh`
 
 ---
@@ -113,6 +113,7 @@ Manual entry control via Telegram:
   - Available cash
   - Portfolio value
   - Position value (`portfolio - cash`)
+- `Status` → mode, order type, pause state, buy-floor guards, and account summary
 - `Pause` → pause new entries
 - `Resume` → resume new entries
 - `Stop` → final summary + graceful shutdown

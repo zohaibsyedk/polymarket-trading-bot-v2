@@ -86,7 +86,7 @@ def run() -> None:
         send(
             "[PolyMarket Trading Bot V2]\n"
             f"[Status: Started - Mode: {cfg.trading_mode.upper()}]\n"
-            "[Commands: Log, Market, Snapshot, Poly, Pause, Resume, Stop]"
+            "[Commands: Log, Market, Snapshot, Poly, Status, Pause, Resume, Stop]"
         )
 
     while not stop_requested:
@@ -194,6 +194,13 @@ def run() -> None:
                 {k: {"slug": v.slug, "up": v.up_price, "down": v.down_price} for k, v in active.items()},
                 latest_live_account,
                 manual_entries_paused or trading_paused_by_reconcile,
+                {
+                    "trading_mode": cfg.trading_mode,
+                    "order_type": os.getenv("POLYMARKET_LIVE_ORDER_TYPE", "GTC").upper(),
+                    "min_buy_trigger_price": cfg.min_buy_trigger_price,
+                    "min_buy_fill_price": cfg.min_buy_fill_price,
+                    "pause_on_buy_fill_below_min": cfg.pause_on_buy_fill_below_min,
+                },
             )
             if control_action == "pause":
                 manual_entries_paused = True

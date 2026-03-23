@@ -69,8 +69,10 @@ def handle_command(
     active_market_data: dict[str, dict] | None = None,
     live_account: dict | None = None,
     entries_paused: bool = False,
+    status_context: dict | None = None,
 ) -> tuple[str, bool, str | None]:
     c = cmd.strip().lower()
+    ctx = status_context or {}
     # Accept telegram-style commands like /poly or /poly@BotName
     if c.startswith('/'):
         c = c[1:]
@@ -105,6 +107,25 @@ def handle_command(
             f"[Position Value: ${pos_f:.4f}]"
             f"{note}"
         ), False, None
+    if c == "status":
+        acct = live_account or {}
+        cash = acct.get("cash_available")
+        portfolio_total = acct.get("portfolio_value")
+        cash_f = float(cash) if cash is not None else 0.0
+        port_f = float(portfolio_total) if portfolio_total is not None else cash_f
+        pos_f = port_f - cash_f
+        return (
+            "[Bot Status]\n"
+            f"[Entries Paused: {'YES' if entries_paused else 'NO'}]\n"
+            f"[Mode: {ctx.get('trading_mode','unknown').upper()}]\n"
+            f"[Order Type: {ctx.get('order_type','unknown')}]\n"
+            f"[Min Buy Trigger: {ctx.get('min_buy_trigger_price','?')}]\n"
+            f"[Min Buy Fill: {ctx.get('min_buy_fill_price','?')}]\n"
+            f"[Pause on Low Fill: {ctx.get('pause_on_buy_fill_below_min','?')}]\n"
+            f"[Cash: ${cash_f:.4f}]\n"
+            f"[Portfolio: ${port_f:.4f}]\n"
+            f"[Position Value: ${pos_f:.4f}]"
+        ), False, None
     if c == "pause":
         if entries_paused:
             return "[Trading] Entries already paused.", False, None
@@ -115,4 +136,4 @@ def handle_command(
         return "[Trading] Entries resumed.", False, "resume"
     if c == "stop":
         return build_log_summary(portfolio, live_account=live_account), True, None
-    return "Unknown command. Use Log, Market, Snapshot, Poly, Pause, Resume, or Stop.", False, None
+    return "Unknown command. Use Log, Market, Snapshot, Poly, Status, Pause, Resume, or Stop.", False, None
