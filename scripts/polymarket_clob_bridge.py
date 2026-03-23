@@ -102,8 +102,15 @@ def _load_cached_creds() -> dict[str, Any] | None:
         if not path.exists():
             return None
         data = json.loads(path.read_text())
-        if all(k in data for k in ("key", "secret", "passphrase")):
+        # Support both legacy and canonical field names.
+        if all(k in data for k in ("api_key", "api_secret", "api_passphrase")):
             return data
+        if all(k in data for k in ("key", "secret", "passphrase")):
+            return {
+                "api_key": data["key"],
+                "api_secret": data["secret"],
+                "api_passphrase": data["passphrase"],
+            }
     except Exception:
         return None
     return None
@@ -114,9 +121,9 @@ def _save_cached_creds(creds: Any) -> None:
     try:
         get = creds.get if isinstance(creds, dict) else (lambda _k: None)
         data = {
-            "key": getattr(creds, "api_key", None) or getattr(creds, "key", None) or get("key"),
-            "secret": getattr(creds, "api_secret", None) or getattr(creds, "secret", None) or get("secret"),
-            "passphrase": getattr(creds, "api_passphrase", None) or getattr(creds, "passphrase", None) or get("passphrase"),
+            "api_key": getattr(creds, "api_key", None) or getattr(creds, "key", None) or get("api_key") or get("key"),
+            "api_secret": getattr(creds, "api_secret", None) or getattr(creds, "secret", None) or get("api_secret") or get("secret"),
+            "api_passphrase": getattr(creds, "api_passphrase", None) or getattr(creds, "passphrase", None) or get("api_passphrase") or get("passphrase"),
         }
         if not all(data.values()):
             return
@@ -128,6 +135,30 @@ def _save_cached_creds(creds: Any) -> None:
             pass
     except Exception:
         pass
+
+
+def _to_api_creds_obj(creds: Any):
+    try:
+        from py_clob_client.clob_types import ApiCreds
+    except Exception as e:
+        raise RuntimeError("py-clob-client missing ApiCreds type") from e
+
+    if isinstance(creds, ApiCreds):
+        return creds
+
+    if isinstance(creds, dict):
+        return ApiCreds(
+            api_key=creds.get("api_key") or creds.get("key") or "",
+            api_secret=creds.get("api_secret") or creds.get("secret") or "",
+            api_passphrase=creds.get("api_passphrase") or creds.get("passphrase") or "",
+        )
+
+    # fallback for objects that already have expected attrs
+    return ApiCreds(
+        api_key=getattr(creds, "api_key", ""),
+        api_secret=getattr(creds, "api_secret", ""),
+        api_passphrase=getattr(creds, "api_passphrase", ""),
+    )
 
 
 def _init_clob_client():
@@ -155,14 +186,15 @@ def _init_clob_client():
         cached = _load_cached_creds()
         if cached:
             try:
-                client.set_api_creds(cached)
+                client.set_api_creds(_to_api_creds_obj(cached))
                 return client
             except Exception:
                 pass
 
         creds = client.create_or_derive_api_creds()
-        client.set_api_creds(creds)
-        _save_cached_creds(creds)
+        creds_obj = _to_api_creds_obj(creds)
+        client.set_api_creds(creds_obj)
+        _save_cached_creds(creds_obj)
 
     return client
 
