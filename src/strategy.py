@@ -23,7 +23,7 @@ def evaluate_entry(cfg: BotConfig, quote: QuoteSnapshot, elapsed_in_market_sec: 
 
     entry_start = cfg.market_interval_seconds - cfg.final_entry_window_seconds
     if elapsed_in_market_sec < entry_start or elapsed_in_market_sec >= cfg.market_interval_seconds:
-        return EntryDecision(False, reason="outside_final_50s_window")
+        return EntryDecision(False, reason=f"outside_final_{cfg.final_entry_window_seconds}s_window")
 
     # New rule: in final window, only enter once any side reaches threshold.
     top = max(quote.up_price, quote.down_price)
