@@ -42,6 +42,10 @@ def run() -> None:
 
     def send(msg: str):
         print("\n--- BOT MESSAGE ---\n" + msg + "\n--- END ---\n")
+        # Defer non-critical Telegram sends during hot window to reduce latency jitter.
+        if in_hot_window:
+            deferred_telegram_msgs.append(msg)
+            return
         tg.send(msg)
 
     stop_requested = False
@@ -51,6 +55,9 @@ def run() -> None:
     manual_entries_paused = False
     latest_live_account: dict = {}
     last_market_bucket_seen: int | None = None
+    in_hot_window = False
+    deferred_telegram_msgs: list[str] = []
+    last_entry_quote_sig: dict[tuple[str, int], tuple[float, float]] = {}
 
     # Startup sync in live mode: seed bot cash/portfolio view from account state.
     if cfg.trading_mode == "live":
@@ -99,6 +106,8 @@ def run() -> None:
     while not stop_requested:
         now_ts = int(time.time())
         window = current_5m_window(now_ts)
+        sec_in_market = now_ts % cfg.market_interval_seconds
+        in_hot_window = sec_in_market >= (cfg.market_interval_seconds - cfg.final_entry_window_seconds)
 
         # market rollover update (start of following market)
         if cfg.trading_mode == "live":
@@ -221,6 +230,7 @@ def run() -> None:
                     })
 
         # resolve market map first so command `Market` has current links
+        fetch_t0 = time.perf_counter()
         active = {}
         with ThreadPoolExecutor(max_workers=2) as ex:
             futs = {ex.submit(resolve_current_market, symbol, window.ts_bucket, now_ts): symbol for symbol in ("BTC", "ETH")}
@@ -232,6 +242,12 @@ def run() -> None:
                     market = None
                 if market:
                     active[symbol] = market
+        append_jsonl(events_log, {
+            "type": "latency_market_fetch",
+            "ts": now_ts,
+            "ms": round((time.perf_counter() - fetch_t0) * 1000, 2),
+            "symbols": list(active.keys()),
+        })
 
         # Telegram command polling
         for chat_id, text in tg.poll_commands():
@@ -319,6 +335,29 @@ def run() -> None:
                 ts=now_ts,
             )
 
+            # Prebuild hint when quote is near trigger to reduce work at decision edge.
+            if max(quote.up_price, quote.down_price) >= (cfg.entry_min_price_threshold - 0.05):
+                append_jsonl(events_log, {
+                    "type": "entry_prebuild_hint",
+                    "ts": now_ts,
+                    "symbol": symbol,
+                    "market_ts": market.market_ts,
+                    "up": quote.up_price,
+                    "down": quote.down_price,
+                })
+
+            qkey = (symbol, market.market_ts)
+            qsig = (round(float(quote.up_price), 6), round(float(quote.down_price), 6))
+            if last_entry_quote_sig.get(qkey) == qsig:
+                append_jsonl(events_log, {
+                    "type": "entry_check_skipped_unchanged_quote",
+                    "ts": now_ts,
+                    "symbol": symbol,
+                    "market_ts": market.market_ts,
+                })
+                continue
+            last_entry_quote_sig[qkey] = qsig
+
             entry = evaluate_entry(cfg, quote, elapsed, portfolio.cash_available)
             append_jsonl(events_log, {
                 "type": "entry_check",
@@ -362,6 +401,7 @@ def run() -> None:
                     })
                     continue
                 token_id = market.up_token_id if entry.side == "UP" else market.down_token_id
+                submit_t0 = time.perf_counter()
                 try:
                     p = engine.enter_position(
                         portfolio=portfolio,
@@ -375,6 +415,14 @@ def run() -> None:
                     )
                 except Exception as e:
                     err = str(e)
+                    append_jsonl(events_log, {
+                        "type": "latency_order_submit",
+                        "ts": now_ts,
+                        "symbol": symbol,
+                        "market_ts": market.market_ts,
+                        "action": "entry_failed",
+                        "ms": round((time.perf_counter() - submit_t0) * 1000, 2),
+                    })
                     send(
                         "[Fill Failed] "
                         f"[{symbol} {entry.side}] "
@@ -392,6 +440,15 @@ def run() -> None:
                         "error": err,
                     })
                     continue
+
+                append_jsonl(events_log, {
+                    "type": "latency_order_submit",
+                    "ts": now_ts,
+                    "symbol": symbol,
+                    "market_ts": market.market_ts,
+                    "action": "entry",
+                    "ms": round((time.perf_counter() - submit_t0) * 1000, 2),
+                })
 
                 send(
                     "[Order Placed] "
@@ -440,6 +497,7 @@ def run() -> None:
                 side_liquidity_px = m.bid_up_price if p.side == "UP" else m.bid_down_price
                 stop_loss_price = round(p.entry_price * cfg.stop_loss_pct_of_entry, 6)
                 if side_price <= stop_loss_price and side_liquidity_px is not None and side_liquidity_px > 0:
+                    exit_t0 = time.perf_counter()
                     try:
                         closed = engine.exit_position(
                             portfolio=portfolio,
@@ -449,6 +507,14 @@ def run() -> None:
                         )
                     except Exception as e:
                         err = str(e)
+                        append_jsonl(events_log, {
+                            "type": "latency_order_submit",
+                            "ts": now_ts,
+                            "symbol": p.symbol,
+                            "market_ts": p.market_ts,
+                            "action": "exit_failed",
+                            "ms": round((time.perf_counter() - exit_t0) * 1000, 2),
+                        })
                         send(
                             "[Fill Failed] "
                             f"[{p.symbol} EXIT {p.side}] "
@@ -466,6 +532,14 @@ def run() -> None:
                         })
                         continue
 
+                    append_jsonl(events_log, {
+                        "type": "latency_order_submit",
+                        "ts": now_ts,
+                        "symbol": p.symbol,
+                        "market_ts": p.market_ts,
+                        "action": "exit",
+                        "ms": round((time.perf_counter() - exit_t0) * 1000, 2),
+                    })
                     send(
                         "[Order Placed] "
                         f"[{p.symbol} EXIT {p.side}] "
@@ -527,8 +601,13 @@ def run() -> None:
             "open_positions": len(portfolio.open_positions),
         })
 
-        sec_in_market = now_ts % cfg.market_interval_seconds
-        if sec_in_market >= (cfg.market_interval_seconds - cfg.final_entry_window_seconds):
+        # Flush deferred Telegram sends when we leave the hot window.
+        if not in_hot_window and deferred_telegram_msgs:
+            for m in deferred_telegram_msgs[:]:
+                tg.send(m)
+            deferred_telegram_msgs.clear()
+
+        if in_hot_window:
             sleep_s = cfg.hot_poll_seconds
         else:
             sleep_s = cfg.poll_seconds
