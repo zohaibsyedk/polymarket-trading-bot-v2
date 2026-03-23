@@ -2,6 +2,12 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# Auto-activate project virtualenv when available.
+if [ -d .venv ]; then
+  # shellcheck disable=SC1091
+  source .venv/bin/activate
+fi
+
 if [ -f .env.live ]; then
   set -a
   source .env.live

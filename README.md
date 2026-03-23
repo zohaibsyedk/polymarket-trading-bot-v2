@@ -34,6 +34,7 @@ From this directory:
 ```
 
 `run.sh` behavior:
+- Auto-activates `.venv` if present
 - Loads `.env.live` first (fallback `.env`)
 - Creates run archive folders:
   - `logs/archive/<RUN_ID>/`
