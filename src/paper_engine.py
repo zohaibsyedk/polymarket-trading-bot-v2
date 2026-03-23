@@ -21,6 +21,27 @@ class PortfolioState:
     def create_position(self, symbol: str, market_ts: int, side: str, price: float, now_ts: int, size_usd: float) -> Position:
         contracts = round(size_usd / price, 6)
         cost = round(contracts * price, 6)
+        return self.create_position_from_fill(
+            symbol=symbol,
+            market_ts=market_ts,
+            side=side,
+            price=price,
+            contracts=contracts,
+            cost=cost,
+            now_ts=now_ts,
+        )
+
+    def create_position_from_fill(
+        self,
+        symbol: str,
+        market_ts: int,
+        side: str,
+        price: float,
+        contracts: float,
+        cost: float,
+        now_ts: int,
+        entry_order_id: str | None = None,
+    ) -> Position:
         if cost > self.cash_available:
             raise ValueError("insufficient cash")
 
@@ -29,22 +50,34 @@ class PortfolioState:
             symbol=symbol,
             market_ts=market_ts,
             side=side,
-            contracts=contracts,
-            entry_price=price,
-            entry_cost=cost,
+            contracts=round(contracts, 6),
+            entry_price=round(price, 6),
+            entry_cost=round(cost, 6),
             opened_at=now_ts,
+            entry_order_id=entry_order_id,
         )
         self.next_position_id += 1
-        self.cash_available = round(self.cash_available - cost, 6)
+        self.cash_available = round(self.cash_available - p.entry_cost, 6)
         self.open_positions[p.position_id] = p
         return p
 
     def close_position(self, position_id: int, exit_price: float, now_ts: int) -> Position:
+        proceeds = round(self.open_positions[position_id].contracts * exit_price, 6)
+        return self.close_position_from_fill(position_id, exit_price, proceeds, now_ts)
+
+    def close_position_from_fill(
+        self,
+        position_id: int,
+        exit_price: float,
+        proceeds: float,
+        now_ts: int,
+        exit_order_id: str | None = None,
+    ) -> Position:
         p = self.open_positions.pop(position_id)
-        proceeds = round(p.contracts * exit_price, 6)
-        self.cash_available = round(self.cash_available + proceeds, 6)
-        p.exit_price = exit_price
+        self.cash_available = round(self.cash_available + round(proceeds, 6), 6)
+        p.exit_price = round(exit_price, 6)
         p.closed_at = now_ts
+        p.exit_order_id = exit_order_id
         self.closed_positions.append(p)
         return p
 

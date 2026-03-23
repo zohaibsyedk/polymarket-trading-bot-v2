@@ -4,6 +4,7 @@ from .market_discovery import current_5m_window
 from .paper_engine import PortfolioState
 from .models import QuoteSnapshot
 from .strategy import evaluate_entry
+from .execution import PaperExecutionEngine, LiveExecutionBridgeEngine
 from .notifier import format_entry_message, format_exit_message
 from .logging_io import append_jsonl, write_json
 from .telegram_commands import handle_command
@@ -13,6 +14,9 @@ from .market_data import resolve_current_market, resolve_settlement_payout, fetc
 
 def run() -> None:
     cfg = BotConfig()
+    if cfg.trading_mode not in {"paper", "live"}:
+        raise ValueError("PMB2_TRADING_MODE must be 'paper' or 'live'")
+
     portfolio = PortfolioState(cash_available=cfg.starting_cash)
 
     trades_log = cfg.logs_dir / "trades.jsonl"
@@ -25,6 +29,11 @@ def run() -> None:
         poll_timeout_s=cfg.telegram_poll_timeout_s,
     )
 
+    if cfg.trading_mode == "live":
+        engine = LiveExecutionBridgeEngine(cfg.live_bridge_cmd, timeout_seconds=cfg.live_bridge_timeout_s)
+    else:
+        engine = PaperExecutionEngine()
+
     def send(msg: str):
         print("\n--- BOT MESSAGE ---\n" + msg + "\n--- END ---\n")
         tg.send(msg)
@@ -32,7 +41,11 @@ def run() -> None:
     stop_requested = False
 
     if cfg.telegram_enabled and cfg.telegram_bot_token:
-        send("[PolyMarket Trading Bot V2]\n[Status: Started]\n[Commands: Log, Market, Snapshot, Stop]")
+        send(
+            "[PolyMarket Trading Bot V2]\n"
+            f"[Status: Started - Mode: {cfg.trading_mode.upper()}]\n"
+            "[Commands: Log, Market, Snapshot, Stop]"
+        )
 
     while not stop_requested:
         now_ts = int(time.time())
@@ -114,7 +127,38 @@ def run() -> None:
                 },
             })
             if entry.should_enter and entry.side and entry.price and entry.size_usd:
-                p = portfolio.create_position(symbol, market.market_ts, entry.side, entry.price, now_ts, entry.size_usd)
+                intended_size = min(entry.size_usd, cfg.max_position_usd)
+                if portfolio.open_position_value + intended_size > cfg.max_total_open_usd:
+                    append_jsonl(events_log, {
+                        "type": "entry_blocked_risk",
+                        "ts": now_ts,
+                        "symbol": symbol,
+                        "market_ts": market.market_ts,
+                        "size_usd": intended_size,
+                        "max_total_open_usd": cfg.max_total_open_usd,
+                    })
+                    continue
+                try:
+                    p = engine.enter_position(
+                        portfolio=portfolio,
+                        symbol=symbol,
+                        market_ts=market.market_ts,
+                        side=entry.side,
+                        limit_price=entry.price,
+                        size_usd=intended_size,
+                        now_ts=now_ts,
+                    )
+                except Exception as e:
+                    append_jsonl(events_log, {
+                        "type": "entry_failed",
+                        "ts": now_ts,
+                        "symbol": symbol,
+                        "market_ts": market.market_ts,
+                        "slug": market.slug,
+                        "error": str(e),
+                    })
+                    continue
+
                 send(format_entry_message(p, portfolio))
                 append_jsonl(trades_log, {
                     "type": "entry",
@@ -122,6 +166,7 @@ def run() -> None:
                     "position": p.to_dict(),
                     "reason": entry.reason,
                     "slug": market.slug,
+                    "mode": cfg.trading_mode,
                 })
 
         # EXIT rules:
@@ -134,7 +179,23 @@ def run() -> None:
                 side_liquidity_px = m.bid_up_price if p.side == "UP" else m.bid_down_price
                 stop_loss_price = round(p.entry_price * cfg.stop_loss_pct_of_entry, 6)
                 if side_price <= stop_loss_price and side_liquidity_px is not None and side_liquidity_px > 0:
-                    closed = portfolio.close_position(p.position_id, side_liquidity_px, now_ts)
+                    try:
+                        closed = engine.exit_position(
+                            portfolio=portfolio,
+                            p=p,
+                            limit_price=side_liquidity_px,
+                            now_ts=now_ts,
+                        )
+                    except Exception as e:
+                        append_jsonl(events_log, {
+                            "type": "exit_failed",
+                            "ts": now_ts,
+                            "position_id": p.position_id,
+                            "reason": "stop_loss",
+                            "error": str(e),
+                        })
+                        continue
+
                     send(format_exit_message(closed, portfolio))
                     append_jsonl(trades_log, {
                         "type": "exit",
@@ -144,13 +205,30 @@ def run() -> None:
                         "market_price": side_price,
                         "stop_loss_price": stop_loss_price,
                         "executed_price": side_liquidity_px,
+                        "mode": cfg.trading_mode,
                     })
                     continue
 
             payout = resolve_settlement_payout(p.symbol, p.market_ts, p.side)
             if payout is None:
                 continue
-            closed = portfolio.close_position(p.position_id, payout, now_ts)
+            try:
+                closed = engine.exit_position(
+                    portfolio=portfolio,
+                    p=p,
+                    limit_price=payout,
+                    now_ts=now_ts,
+                )
+            except Exception as e:
+                append_jsonl(events_log, {
+                    "type": "exit_failed",
+                    "ts": now_ts,
+                    "position_id": p.position_id,
+                    "reason": "market_settlement",
+                    "error": str(e),
+                })
+                continue
+
             send(format_exit_message(closed, portfolio))
             append_jsonl(trades_log, {
                 "type": "exit",
@@ -158,10 +236,12 @@ def run() -> None:
                 "position": closed.to_dict(),
                 "reason": "market_settlement",
                 "payout_per_contract": payout,
+                "mode": cfg.trading_mode,
             })
 
         snapshot = {
             "ts": now_ts,
+            "trading_mode": cfg.trading_mode,
             "active_market_ts": {k: v.market_ts for k, v in active.items()},
             "active_market_slug": {k: v.slug for k, v in active.items()},
             "cash_available": portfolio.cash_available,

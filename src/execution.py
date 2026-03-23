@@ -1,0 +1,179 @@
+from __future__ import annotations
+
+import json
+import subprocess
+from dataclasses import dataclass
+
+from .models import Position
+from .paper_engine import PortfolioState
+
+
+@dataclass
+class EntryFill:
+    price: float
+    contracts: float
+    cost: float
+    order_id: str | None = None
+
+
+@dataclass
+class ExitFill:
+    price: float
+    proceeds: float
+    order_id: str | None = None
+
+
+class BaseExecutionEngine:
+    def enter_position(
+        self,
+        portfolio: PortfolioState,
+        symbol: str,
+        market_ts: int,
+        side: str,
+        limit_price: float,
+        size_usd: float,
+        now_ts: int,
+    ) -> Position:
+        raise NotImplementedError
+
+    def exit_position(
+        self,
+        portfolio: PortfolioState,
+        p: Position,
+        limit_price: float,
+        now_ts: int,
+    ) -> Position:
+        raise NotImplementedError
+
+
+class PaperExecutionEngine(BaseExecutionEngine):
+    def enter_position(
+        self,
+        portfolio: PortfolioState,
+        symbol: str,
+        market_ts: int,
+        side: str,
+        limit_price: float,
+        size_usd: float,
+        now_ts: int,
+    ) -> Position:
+        return portfolio.create_position(symbol, market_ts, side, limit_price, now_ts, size_usd)
+
+    def exit_position(
+        self,
+        portfolio: PortfolioState,
+        p: Position,
+        limit_price: float,
+        now_ts: int,
+    ) -> Position:
+        return portfolio.close_position(p.position_id, limit_price, now_ts)
+
+
+class LiveExecutionBridgeEngine(BaseExecutionEngine):
+    """
+    Live mode via external bridge command.
+
+    Configure PMB2_LIVE_BRIDGE_CMD as an executable command that reads JSON from stdin
+    and returns JSON to stdout.
+
+    Buy request payload example:
+      {"action":"buy","symbol":"BTC","market_ts":123,"side":"UP","limit_price":0.81,"size_usd":50}
+
+    Buy response JSON expected:
+      {"ok":true,"fill_price":0.81,"contracts":61.728395,"cost":50,"order_id":"abc"}
+
+    Sell request payload example:
+      {"action":"sell","symbol":"BTC","market_ts":123,"side":"UP","contracts":61.728395,"limit_price":0.52}
+
+    Sell response JSON expected:
+      {"ok":true,"fill_price":0.52,"proceeds":32.098765,"order_id":"def"}
+    """
+
+    def __init__(self, bridge_cmd: str, timeout_seconds: int = 15):
+        if not bridge_cmd.strip():
+            raise ValueError("PMB2_LIVE_BRIDGE_CMD is required in live mode")
+        self.bridge_cmd = bridge_cmd
+        self.timeout_seconds = timeout_seconds
+
+    def _call_bridge(self, payload: dict) -> dict:
+        p = subprocess.run(
+            self.bridge_cmd,
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            shell=True,
+            timeout=self.timeout_seconds,
+            check=False,
+        )
+        if p.returncode != 0:
+            raise RuntimeError(f"bridge_failed: rc={p.returncode} stderr={p.stderr.strip()}")
+        try:
+            out = json.loads(p.stdout.strip() or "{}")
+        except Exception as e:
+            raise RuntimeError(f"bridge_invalid_json: {e}") from e
+        if not out.get("ok"):
+            raise RuntimeError(f"bridge_order_rejected: {out}")
+        return out
+
+    def enter_position(
+        self,
+        portfolio: PortfolioState,
+        symbol: str,
+        market_ts: int,
+        side: str,
+        limit_price: float,
+        size_usd: float,
+        now_ts: int,
+    ) -> Position:
+        out = self._call_bridge({
+            "action": "buy",
+            "symbol": symbol,
+            "market_ts": market_ts,
+            "side": side,
+            "limit_price": float(limit_price),
+            "size_usd": float(size_usd),
+        })
+        fill = EntryFill(
+            price=float(out["fill_price"]),
+            contracts=float(out["contracts"]),
+            cost=float(out["cost"]),
+            order_id=out.get("order_id"),
+        )
+        return portfolio.create_position_from_fill(
+            symbol=symbol,
+            market_ts=market_ts,
+            side=side,
+            price=fill.price,
+            contracts=fill.contracts,
+            cost=fill.cost,
+            now_ts=now_ts,
+            entry_order_id=fill.order_id,
+        )
+
+    def exit_position(
+        self,
+        portfolio: PortfolioState,
+        p: Position,
+        limit_price: float,
+        now_ts: int,
+    ) -> Position:
+        out = self._call_bridge({
+            "action": "sell",
+            "symbol": p.symbol,
+            "market_ts": p.market_ts,
+            "side": p.side,
+            "contracts": float(p.contracts),
+            "limit_price": float(limit_price),
+        })
+        fill = ExitFill(
+            price=float(out["fill_price"]),
+            proceeds=float(out["proceeds"]),
+            order_id=out.get("order_id"),
+        )
+        return portfolio.close_position_from_fill(
+            position_id=p.position_id,
+            exit_price=fill.price,
+            proceeds=fill.proceeds,
+            now_ts=now_ts,
+            exit_order_id=fill.order_id,
+        )

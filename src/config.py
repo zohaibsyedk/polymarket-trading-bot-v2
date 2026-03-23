@@ -21,6 +21,15 @@ class BotConfig:
     logs_dir: Path = Path(os.getenv("PMB2_LOGS_DIR", str(workspace_root / "logs")))
     state_dir: Path = Path(os.getenv("PMB2_STATE_DIR", str(workspace_root / "state")))
 
+    # Trading mode
+    trading_mode: str = os.getenv("PMB2_TRADING_MODE", "paper").strip().lower()  # paper | live
+    live_bridge_cmd: str = os.getenv("PMB2_LIVE_BRIDGE_CMD", "").strip()
+    live_bridge_timeout_s: int = int(os.getenv("PMB2_LIVE_BRIDGE_TIMEOUT_S", "15"))
+
+    # Risk controls
+    max_position_usd: float = float(os.getenv("PMB2_MAX_POSITION_USD", "100"))
+    max_total_open_usd: float = float(os.getenv("PMB2_MAX_TOTAL_OPEN_USD", "300"))
+
     # Telegram runtime controls
     telegram_enabled: bool = os.getenv("PMB2_TELEGRAM_ENABLED", "0") == "1"
     telegram_bot_token: str = os.getenv("PMB2_TELEGRAM_BOT_TOKEN", "")
