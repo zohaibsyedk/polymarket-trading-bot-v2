@@ -343,6 +343,11 @@ def _fill_polling_disabled() -> bool:
     return os.getenv("POLYMARKET_DISABLE_FILL_POLLING", "0") == "1"
 
 
+def _is_invalid_amounts_error(e: Exception) -> bool:
+    s = str(e).lower()
+    return "invalid amounts" in s or "max accuracy" in s
+
+
 def _place_limit_buy(client, token_id: str, limit_price: float, size_usd: float) -> dict[str, Any]:
     try:
         from py_clob_client.clob_types import MarketOrderArgs, OrderArgs
@@ -365,23 +370,48 @@ def _place_limit_buy(client, token_id: str, limit_price: float, size_usd: float)
 
     if order_type_name in {"FAK", "FOK"}:
         # Use market-order builder for market-style execution; amount is collateral for BUY.
-        order = MarketOrderArgs(
-            token_id=str(token_id),
-            amount=float(round(_size_usd_q, 2)),
-            side=BUY,
-            price=float(round(limit_price, 4)),
-        )
-        try:
-            signed = client.create_market_order(order)
-        except Exception:
+        # Precision edge cases exist at the exchange; retry by reducing amount in 1-cent steps.
+        last_exc: Exception | None = None
+        signed = None
+        for i in range(0, 8):
+            amt = round(max(0.01, _size_usd_q - (0.01 * i)), 2)
+            try:
+                order = MarketOrderArgs(
+                    token_id=str(token_id),
+                    amount=float(amt),
+                    side=BUY,
+                    price=float(round(limit_price, 4)),
+                )
+                signed = client.create_market_order(order)
+                requested_contracts = round(amt / float(limit_price), 4)
+                break
+            except Exception as e:
+                last_exc = e
+                if not _is_invalid_amounts_error(e):
+                    break
+
+        if signed is None:
             # Fallback to regular order builder with quantized size if market builder rejects precision.
-            order2 = OrderArgs(
-                price=float(round(limit_price, 4)),
-                size=float(round(requested_contracts, 4)),
-                side=BUY,
-                token_id=str(token_id),
-            )
-            signed = client.create_order(order2)
+            for i in range(0, 8):
+                amt = round(max(0.01, _size_usd_q - (0.01 * i)), 2)
+                size4 = round(amt / float(limit_price), 4)
+                try:
+                    order2 = OrderArgs(
+                        price=float(round(limit_price, 4)),
+                        size=float(size4),
+                        side=BUY,
+                        token_id=str(token_id),
+                    )
+                    signed = client.create_order(order2)
+                    requested_contracts = size4
+                    break
+                except Exception as e:
+                    last_exc = e
+                    if not _is_invalid_amounts_error(e):
+                        break
+
+        if signed is None:
+            raise RuntimeError(f"buy_order_build_failed: {last_exc}")
     else:
         order = OrderArgs(
             price=float(round(limit_price, 4)),
