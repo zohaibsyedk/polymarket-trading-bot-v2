@@ -48,6 +48,7 @@ def handle_command(
     portfolio: PortfolioState,
     active_market_slug: dict[str, str] | None = None,
     active_market_data: dict[str, dict] | None = None,
+    live_account: dict | None = None,
 ) -> tuple[str, bool]:
     c = cmd.strip().lower()
     if c == "log":
@@ -56,6 +57,21 @@ def handle_command(
         return build_market_summary(active_market_slug or {}), False
     if c == "snapshot":
         return build_snapshot_summary(active_market_data or {}), False
+    if c == "poly":
+        acct = live_account or {}
+        cash = acct.get("cash_available")
+        portfolio_total = acct.get("portfolio_value")
+        if cash is None or portfolio_total is None:
+            return "[Poly] Account totals unavailable yet. Wait for reconcile tick.", False
+        cash_f = float(cash)
+        port_f = float(portfolio_total)
+        pos_f = port_f - cash_f
+        return (
+            "[PolyMarket Account]\n"
+            f"[Available Cash: ${cash_f:.4f}]\n"
+            f"[Portfolio Value: ${port_f:.4f}]\n"
+            f"[Position Value: ${pos_f:.4f}]"
+        ), False
     if c == "stop":
         return build_log_summary(portfolio), True
-    return "Unknown command. Use Log, Market, Snapshot, or Stop.", False
+    return "Unknown command. Use Log, Market, Snapshot, Poly, or Stop.", False

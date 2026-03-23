@@ -42,12 +42,13 @@ def run() -> None:
     last_claim_check_ts = 0
     last_reconcile_ts = 0
     trading_paused_by_reconcile = False
+    latest_live_account: dict = {}
 
     if cfg.telegram_enabled and cfg.telegram_bot_token:
         send(
             "[PolyMarket Trading Bot V2]\n"
             f"[Status: Started - Mode: {cfg.trading_mode.upper()}]\n"
-            "[Commands: Log, Market, Snapshot, Stop]"
+            "[Commands: Log, Market, Snapshot, Poly, Stop]"
         )
 
     while not stop_requested:
@@ -82,6 +83,30 @@ def run() -> None:
                 try:
                     acct = engine.get_account_state()
                     bridge_cash = acct.get("cash_available")
+
+                    # Fill derived totals when bridge cannot provide direct portfolio value.
+                    bridge_portfolio_value = acct.get("portfolio_value")
+                    if bridge_portfolio_value is None and bridge_cash is not None:
+                        pos_val = 0.0
+                        for row in (acct.get("positions") or []):
+                            if not isinstance(row, dict):
+                                continue
+                            for k in ("value", "current_value", "market_value", "position_value", "notional", "usd_value"):
+                                if row.get(k) is not None:
+                                    try:
+                                        pos_val += float(row.get(k))
+                                        break
+                                    except Exception:
+                                        pass
+                        bridge_portfolio_value = float(bridge_cash) + pos_val
+                        acct["portfolio_value"] = round(float(bridge_portfolio_value), 6)
+
+                    latest_live_account = {
+                        "cash_available": bridge_cash,
+                        "portfolio_value": acct.get("portfolio_value"),
+                        "positions": acct.get("positions") or [],
+                    }
+
                     cash_drift = None
                     if bridge_cash is not None:
                         bridge_cash = float(bridge_cash)
@@ -129,6 +154,7 @@ def run() -> None:
                 portfolio,
                 {k: v.slug for k, v in active.items()},
                 {k: {"slug": v.slug, "up": v.up_price, "down": v.down_price} for k, v in active.items()},
+                latest_live_account,
             )
             tg.send(resp, chat_id=chat_id)
             append_jsonl(events_log, {"type": "command", "ts": now_ts, "chat_id": chat_id, "text": text, "stop": should_stop})
@@ -321,6 +347,7 @@ def run() -> None:
             "open_positions": [p.to_dict() for p in portfolio.open_positions.values()],
             "realized_pnl": portfolio.realized_pnl(),
             "paused_entries": trading_paused_by_reconcile,
+            "live_account": latest_live_account,
         }
         write_json(status_path, snapshot)
         append_jsonl(events_log, {

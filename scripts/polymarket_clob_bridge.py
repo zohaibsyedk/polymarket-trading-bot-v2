@@ -344,6 +344,25 @@ def _extract_cash_from_any(resp: Any) -> float | None:
     return None
 
 
+def _extract_portfolio_value_from_any(resp: Any) -> float | None:
+    if isinstance(resp, dict):
+        for k in ("portfolio_value", "equity", "total_value", "account_value", "net_value"):
+            v = _to_f(resp.get(k))
+            if v is not None:
+                return float(v)
+        for k in ("data", "result", "account", "balances"):
+            if k in resp:
+                v = _extract_portfolio_value_from_any(resp[k])
+                if v is not None:
+                    return v
+    elif isinstance(resp, list):
+        for row in resp:
+            v = _extract_portfolio_value_from_any(row)
+            if v is not None:
+                return v
+    return None
+
+
 def _extract_positions_from_any(resp: Any) -> list[dict[str, Any]]:
     if isinstance(resp, list):
         out = []
@@ -362,17 +381,24 @@ def _extract_positions_from_any(resp: Any) -> list[dict[str, Any]]:
 
 def _account_state(client) -> dict[str, Any]:
     cash = None
+    portfolio_value = None
     positions: list[dict[str, Any]] = []
 
-    # Try cash/balance methods
+    # Try cash/balance/account methods
     for name in ("get_balance", "get_balances", "get_collateral", "get_account", "get_profile"):
         if not hasattr(client, name):
             continue
         try:
             resp = getattr(client, name)()
-            v = _extract_cash_from_any(resp)
-            if v is not None:
-                cash = round(float(v), 6)
+            if cash is None:
+                v = _extract_cash_from_any(resp)
+                if v is not None:
+                    cash = round(float(v), 6)
+            if portfolio_value is None:
+                pv = _extract_portfolio_value_from_any(resp)
+                if pv is not None:
+                    portfolio_value = round(float(pv), 6)
+            if cash is not None and portfolio_value is not None:
                 break
         except Exception:
             continue
@@ -390,9 +416,21 @@ def _account_state(client) -> dict[str, Any]:
         except Exception:
             continue
 
+    # Derive portfolio value if needed and possible
+    if portfolio_value is None and cash is not None:
+        pos_val = 0.0
+        for row in positions:
+            for k in ("value", "current_value", "market_value", "position_value", "notional", "usd_value"):
+                v = _to_f(row.get(k))
+                if v is not None:
+                    pos_val += float(v)
+                    break
+        portfolio_value = round(float(cash) + pos_val, 6)
+
     return {
         "ok": True,
         "cash_available": cash,
+        "portfolio_value": portfolio_value,
         "positions": positions,
     }
 
