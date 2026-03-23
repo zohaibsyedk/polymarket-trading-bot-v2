@@ -2,7 +2,11 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-if [ -f .env ]; then
+if [ -f .env.live ]; then
+  set -a
+  source .env.live
+  set +a
+elif [ -f .env ]; then
   set -a
   source .env
   set +a
