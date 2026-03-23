@@ -316,6 +316,7 @@ def run() -> None:
                     f"[Size USD: {float(intended_size):.2f}]"
                 )
 
+                token_id = market.up_token_id if entry.side == "UP" else market.down_token_id
                 try:
                     p = engine.enter_position(
                         portfolio=portfolio,
@@ -325,6 +326,7 @@ def run() -> None:
                         limit_price=entry.price,
                         size_usd=intended_size,
                         now_ts=now_ts,
+                        token_id=token_id,
                     )
                 except Exception as e:
                     err = str(e)

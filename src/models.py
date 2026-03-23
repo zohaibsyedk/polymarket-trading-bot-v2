@@ -13,6 +13,7 @@ class Position:
     entry_cost: float
     opened_at: int
     entry_order_id: Optional[str] = None
+    token_id: Optional[str] = None
     exit_price: Optional[float] = None
     closed_at: Optional[int] = None
     exit_order_id: Optional[str] = None

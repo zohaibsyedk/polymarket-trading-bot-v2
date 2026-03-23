@@ -33,6 +33,7 @@ class BaseExecutionEngine:
         limit_price: float,
         size_usd: float,
         now_ts: int,
+        token_id: str | None = None,
     ) -> Position:
         raise NotImplementedError
 
@@ -62,6 +63,7 @@ class PaperExecutionEngine(BaseExecutionEngine):
         limit_price: float,
         size_usd: float,
         now_ts: int,
+        token_id: str | None = None,
     ) -> Position:
         return portfolio.create_position(symbol, market_ts, side, limit_price, now_ts, size_usd)
 
@@ -133,15 +135,19 @@ class LiveExecutionBridgeEngine(BaseExecutionEngine):
         limit_price: float,
         size_usd: float,
         now_ts: int,
+        token_id: str | None = None,
     ) -> Position:
-        out = self._call_bridge({
+        payload = {
             "action": "buy",
             "symbol": symbol,
             "market_ts": market_ts,
             "side": side,
             "limit_price": float(limit_price),
             "size_usd": float(size_usd),
-        })
+        }
+        if token_id:
+            payload["token_id"] = str(token_id)
+        out = self._call_bridge(payload)
         fill = EntryFill(
             price=float(out["fill_price"]),
             contracts=float(out["contracts"]),
@@ -157,6 +163,7 @@ class LiveExecutionBridgeEngine(BaseExecutionEngine):
             cost=fill.cost,
             now_ts=now_ts,
             entry_order_id=fill.order_id,
+            token_id=str(token_id) if token_id else None,
         )
 
     def exit_position(
@@ -166,14 +173,17 @@ class LiveExecutionBridgeEngine(BaseExecutionEngine):
         limit_price: float,
         now_ts: int,
     ) -> Position:
-        out = self._call_bridge({
+        payload = {
             "action": "sell",
             "symbol": p.symbol,
             "market_ts": p.market_ts,
             "side": p.side,
             "contracts": float(p.contracts),
             "limit_price": float(limit_price),
-        })
+        }
+        if p.token_id:
+            payload["token_id"] = str(p.token_id)
+        out = self._call_bridge(payload)
         fill = ExitFill(
             price=float(out["fill_price"]),
             proceeds=float(out["proceeds"]),

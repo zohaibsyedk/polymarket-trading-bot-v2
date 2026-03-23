@@ -37,6 +37,7 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 import urllib.parse
 import urllib.request
 from typing import Any
@@ -88,6 +89,47 @@ def _token_id_for_side(market: dict[str, Any], side: str) -> str:
     raise RuntimeError("side must be UP or DOWN")
 
 
+def _default_creds_cache_path() -> Path:
+    p = os.getenv("POLYMARKET_API_CREDS_CACHE", "").strip()
+    if p:
+        return Path(p)
+    return Path(__file__).resolve().parents[1] / "state" / "bridge_api_creds.json"
+
+
+def _load_cached_creds() -> dict[str, Any] | None:
+    path = _default_creds_cache_path()
+    try:
+        if not path.exists():
+            return None
+        data = json.loads(path.read_text())
+        if all(k in data for k in ("key", "secret", "passphrase")):
+            return data
+    except Exception:
+        return None
+    return None
+
+
+def _save_cached_creds(creds: Any) -> None:
+    path = _default_creds_cache_path()
+    try:
+        get = creds.get if isinstance(creds, dict) else (lambda _k: None)
+        data = {
+            "key": getattr(creds, "api_key", None) or getattr(creds, "key", None) or get("key"),
+            "secret": getattr(creds, "api_secret", None) or getattr(creds, "secret", None) or get("secret"),
+            "passphrase": getattr(creds, "api_passphrase", None) or getattr(creds, "passphrase", None) or get("passphrase"),
+        }
+        if not all(data.values()):
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data))
+        try:
+            os.chmod(path, 0o600)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
 def _init_clob_client():
     try:
         from py_clob_client.client import ClobClient
@@ -110,8 +152,17 @@ def _init_clob_client():
 
     use_derived = os.getenv("POLYMARKET_USE_DERIVED_CREDS", "1") == "1"
     if use_derived:
+        cached = _load_cached_creds()
+        if cached:
+            try:
+                client.set_api_creds(cached)
+                return client
+            except Exception:
+                pass
+
         creds = client.create_or_derive_api_creds()
         client.set_api_creds(creds)
+        _save_cached_creds(creds)
 
     return client
 
@@ -595,9 +646,11 @@ def main() -> int:
             market_ts = int(payload.get("market_ts"))
             side = str(payload.get("side", "")).strip().upper()
 
-            slug = _slug(symbol, market_ts)
-            market = _fetch_market(slug)
-            token_id = _token_id_for_side(market, side)
+            token_id = str(payload.get("token_id") or "").strip()
+            if not token_id:
+                slug = _slug(symbol, market_ts)
+                market = _fetch_market(slug)
+                token_id = _token_id_for_side(market, side)
 
             if action == "buy":
                 limit_price = float(payload.get("limit_price"))

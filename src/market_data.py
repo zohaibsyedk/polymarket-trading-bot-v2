@@ -23,6 +23,8 @@ class ResolvedMarket:
     bid_down_price: Optional[float]
     ask_up_price: Optional[float]
     ask_down_price: Optional[float]
+    up_token_id: str
+    down_token_id: str
 
 
 def _fetch_slug(slug: str) -> Optional[dict]:
@@ -159,6 +161,8 @@ def fetch_market(symbol: str, market_ts: int) -> Optional[ResolvedMarket]:
         bid_down_price=float(buy_down) if valid_price(buy_down) else None,
         ask_up_price=float(sell_up) if valid_price(sell_up) else None,
         ask_down_price=float(sell_down) if valid_price(sell_down) else None,
+        up_token_id=str(token_ids[0]),
+        down_token_id=str(token_ids[1]),
     )
 
 

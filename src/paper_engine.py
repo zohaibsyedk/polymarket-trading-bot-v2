@@ -41,6 +41,7 @@ class PortfolioState:
         cost: float,
         now_ts: int,
         entry_order_id: str | None = None,
+        token_id: str | None = None,
     ) -> Position:
         if cost > self.cash_available:
             raise ValueError("insufficient cash")
@@ -55,6 +56,7 @@ class PortfolioState:
             entry_cost=round(cost, 6),
             opened_at=now_ts,
             entry_order_id=entry_order_id,
+            token_id=token_id,
         )
         self.next_position_id += 1
         self.cash_available = round(self.cash_available - p.entry_cost, 6)
