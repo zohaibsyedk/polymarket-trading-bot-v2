@@ -20,7 +20,7 @@ Implemented and runnable with:
 - Uses only most current active market per symbol
 - Entry window: final 50 seconds of market
 - Entry trigger: once either side >= 0.75, buy higher side
-- Sizing: `max($50, 10% cash)` then capped by risk limits
+- Sizing: proportional-only `10% cash` (no fixed minimum), then capped by risk limits
 - Stop-loss: side price <= 60% of entry price (with liquidity)
 - Otherwise hold to settlement
 

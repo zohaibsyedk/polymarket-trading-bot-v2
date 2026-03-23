@@ -13,7 +13,8 @@ class EntryDecision:
 
 
 def compute_entry_size(cash_available: float, cfg: BotConfig) -> float:
-    return max(cfg.min_position_usd, cfg.position_pct_cash * cash_available)
+    # Proportional-only sizing (no fixed minimum floor).
+    return cfg.position_pct_cash * cash_available
 
 
 def evaluate_entry(cfg: BotConfig, quote: QuoteSnapshot, elapsed_in_market_sec: int, cash_available: float) -> EntryDecision:
