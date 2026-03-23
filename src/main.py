@@ -45,6 +45,43 @@ def run() -> None:
     manual_entries_paused = False
     latest_live_account: dict = {}
 
+    # Startup sync in live mode: seed bot cash/portfolio view from account state.
+    if cfg.trading_mode == "live":
+        try:
+            acct = engine.get_account_state()
+            bridge_cash = acct.get("cash_available")
+            bridge_portfolio_value = acct.get("portfolio_value")
+
+            if bridge_portfolio_value is None and bridge_cash is not None:
+                pos_val = 0.0
+                for row in (acct.get("positions") or []):
+                    if not isinstance(row, dict):
+                        continue
+                    for k in ("value", "current_value", "market_value", "position_value", "notional", "usd_value"):
+                        if row.get(k) is not None:
+                            try:
+                                pos_val += float(row.get(k))
+                                break
+                            except Exception:
+                                pass
+                bridge_portfolio_value = float(bridge_cash) + pos_val
+                acct["portfolio_value"] = round(float(bridge_portfolio_value), 6)
+
+            latest_live_account = {
+                "cash_available": bridge_cash,
+                "portfolio_value": acct.get("portfolio_value"),
+                "positions": acct.get("positions") or [],
+            }
+
+            if bridge_cash is not None:
+                portfolio.cash_available = round(float(bridge_cash), 6)
+        except Exception as e:
+            append_jsonl(events_log, {
+                "type": "startup_reconcile_failed",
+                "ts": int(time.time()),
+                "error": str(e),
+            })
+
     if cfg.telegram_enabled and cfg.telegram_bot_token:
         send(
             "[PolyMarket Trading Bot V2]\n"
@@ -378,7 +415,7 @@ def run() -> None:
 
         time.sleep(cfg.poll_seconds)
 
-    final_msg = handle_command("log", portfolio)[0] + "\n[Bot stopped]"
+    final_msg = handle_command("log", portfolio, live_account=latest_live_account)[0] + "\n[Bot stopped]"
     send(final_msg)
     append_jsonl(events_log, {"type": "stopped", "ts": int(time.time())})
 

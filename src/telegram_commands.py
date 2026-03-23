@@ -1,7 +1,24 @@
 from .paper_engine import PortfolioState
 
 
-def build_log_summary(portfolio: PortfolioState) -> str:
+def build_log_summary(portfolio: PortfolioState, live_account: dict | None = None) -> str:
+    live = live_account or {}
+    live_cash = live.get("cash_available")
+    live_portfolio = live.get("portfolio_value")
+
+    if live_cash is not None and live_portfolio is not None:
+        cash_f = float(live_cash)
+        port_f = float(live_portfolio)
+        pos_f = port_f - cash_f
+        return (
+            "[PolyMarket Trading Bot V2 - Log]\n"
+            f"[Open Positions (Bot): {len(portfolio.open_positions)}]\n"
+            f"[Total Realized P&L (Bot): {portfolio.realized_pnl():.4f}]\n"
+            f"[Cash Available: {cash_f:.4f}]\n"
+            f"[Position Value: {pos_f:.4f}]\n"
+            f"[Portfolio Value: {port_f:.4f}]"
+        )
+
     return (
         "[PolyMarket Trading Bot V2 - Log]\n"
         f"[Open Positions: {len(portfolio.open_positions)}]\n"
@@ -53,7 +70,7 @@ def handle_command(
 ) -> tuple[str, bool, str | None]:
     c = cmd.strip().lower()
     if c == "log":
-        return build_log_summary(portfolio), False, None
+        return build_log_summary(portfolio, live_account=live_account), False, None
     if c == "market":
         return build_market_summary(active_market_slug or {}), False, None
     if c == "snapshot":
@@ -82,5 +99,5 @@ def handle_command(
             return "[Trading] Entries already active.", False, None
         return "[Trading] Entries resumed.", False, "resume"
     if c == "stop":
-        return build_log_summary(portfolio), True, None
+        return build_log_summary(portfolio, live_account=live_account), True, None
     return "Unknown command. Use Log, Market, Snapshot, Poly, Pause, Resume, or Stop.", False, None
