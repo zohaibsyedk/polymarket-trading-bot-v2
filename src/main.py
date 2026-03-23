@@ -40,6 +40,8 @@ def run() -> None:
 
     stop_requested = False
     last_claim_check_ts = 0
+    last_reconcile_ts = 0
+    trading_paused_by_reconcile = False
 
     if cfg.telegram_enabled and cfg.telegram_bot_token:
         send(
@@ -69,6 +71,44 @@ def run() -> None:
                 except Exception as e:
                     append_jsonl(events_log, {
                         "type": "claim_failed",
+                        "ts": now_ts,
+                        "error": str(e),
+                    })
+
+        # live-mode reconciliation checks
+        if cfg.trading_mode == "live" and cfg.reconcile_enabled:
+            if (now_ts - last_reconcile_ts) >= max(5, cfg.reconcile_interval_s):
+                last_reconcile_ts = now_ts
+                try:
+                    acct = engine.get_account_state()
+                    bridge_cash = acct.get("cash_available")
+                    cash_drift = None
+                    if bridge_cash is not None:
+                        bridge_cash = float(bridge_cash)
+                        cash_drift = round(abs(bridge_cash - portfolio.cash_available), 6)
+                        if cash_drift > cfg.reconcile_cash_drift_usd:
+                            trading_paused_by_reconcile = True
+                            send(
+                                "[Reconcile Alert] "
+                                f"Cash drift ${cash_drift:.4f} exceeds threshold ${cfg.reconcile_cash_drift_usd:.4f}. "
+                                "Pausing new entries."
+                            )
+                        else:
+                            if trading_paused_by_reconcile:
+                                send("[Reconcile] Drift back within threshold. Resuming entries.")
+                            trading_paused_by_reconcile = False
+                            portfolio.cash_available = round(bridge_cash, 6)
+
+                    append_jsonl(events_log, {
+                        "type": "reconcile_check",
+                        "ts": now_ts,
+                        "account_state": acct,
+                        "cash_drift": cash_drift,
+                        "paused_entries": trading_paused_by_reconcile,
+                    })
+                except Exception as e:
+                    append_jsonl(events_log, {
+                        "type": "reconcile_failed",
                         "ts": now_ts,
                         "error": str(e),
                     })
@@ -105,6 +145,15 @@ def run() -> None:
 
         # ENTRY decisions only on current active markets
         for symbol, market in active.items():
+            if trading_paused_by_reconcile:
+                append_jsonl(events_log, {
+                    "type": "entry_blocked_reconcile_pause",
+                    "ts": now_ts,
+                    "symbol": symbol,
+                    "market_ts": market.market_ts,
+                    "slug": market.slug,
+                })
+                continue
             elapsed = now_ts - market.market_ts
             if elapsed < 0:
                 append_jsonl(events_log, {"type": "skip_future_market", "ts": now_ts, "symbol": symbol, "market_ts": market.market_ts})
@@ -271,6 +320,7 @@ def run() -> None:
             "portfolio_value": portfolio.portfolio_value,
             "open_positions": [p.to_dict() for p in portfolio.open_positions.values()],
             "realized_pnl": portfolio.realized_pnl(),
+            "paused_entries": trading_paused_by_reconcile,
         }
         write_json(status_path, snapshot)
         append_jsonl(events_log, {

@@ -54,7 +54,16 @@ Live mode also supports periodic auto-claim checks:
 - `PMB2_AUTO_CLAIM_ENABLED=1`
 - `PMB2_AUTO_CLAIM_INTERVAL_S=90`
 
-The bridge accepts `{"action":"claim"}` and will attempt supported claim/redeem methods on the CLOB client.
+Live mode reconciliation can tie bot cash to account cash:
+- `PMB2_RECONCILE_ENABLED=1`
+- `PMB2_RECONCILE_INTERVAL_S=20`
+- `PMB2_RECONCILE_CASH_DRIFT_USD=1.0`
+
+If drift exceeds threshold, bot pauses **new entries** until drift is back in range.
+
+The bridge accepts:
+- `{"action":"claim"}`
+- `{"action":"account_state"}`
 
 Buy payload sent by bot:
 ```json

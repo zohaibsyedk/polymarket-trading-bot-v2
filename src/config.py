@@ -34,6 +34,11 @@ class BotConfig:
     auto_claim_enabled: bool = os.getenv("PMB2_AUTO_CLAIM_ENABLED", "1") == "1"
     auto_claim_interval_s: int = int(os.getenv("PMB2_AUTO_CLAIM_INTERVAL_S", "90"))
 
+    # Live reconciliation controls
+    reconcile_enabled: bool = os.getenv("PMB2_RECONCILE_ENABLED", "1") == "1"
+    reconcile_interval_s: int = int(os.getenv("PMB2_RECONCILE_INTERVAL_S", "20"))
+    reconcile_cash_drift_usd: float = float(os.getenv("PMB2_RECONCILE_CASH_DRIFT_USD", "1.0"))
+
     # Telegram runtime controls
     telegram_enabled: bool = os.getenv("PMB2_TELEGRAM_ENABLED", "0") == "1"
     telegram_bot_token: str = os.getenv("PMB2_TELEGRAM_BOT_TOKEN", "")

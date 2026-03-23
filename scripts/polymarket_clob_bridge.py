@@ -325,6 +325,78 @@ def _place_limit_sell(client, token_id: str, limit_price: float, contracts: floa
     }
 
 
+def _extract_cash_from_any(resp: Any) -> float | None:
+    if isinstance(resp, dict):
+        for k in ("cash", "cash_available", "available", "available_balance", "balance", "usdc", "collateral"):
+            v = _to_f(resp.get(k))
+            if v is not None:
+                return float(v)
+        for k in ("data", "result", "account", "balances"):
+            if k in resp:
+                v = _extract_cash_from_any(resp[k])
+                if v is not None:
+                    return v
+    elif isinstance(resp, list):
+        for row in resp:
+            v = _extract_cash_from_any(row)
+            if v is not None:
+                return v
+    return None
+
+
+def _extract_positions_from_any(resp: Any) -> list[dict[str, Any]]:
+    if isinstance(resp, list):
+        out = []
+        for row in resp:
+            if isinstance(row, dict):
+                out.append(row)
+        return out
+    if isinstance(resp, dict):
+        for k in ("positions", "data", "result"):
+            if k in resp:
+                rows = _extract_positions_from_any(resp[k])
+                if rows:
+                    return rows
+    return []
+
+
+def _account_state(client) -> dict[str, Any]:
+    cash = None
+    positions: list[dict[str, Any]] = []
+
+    # Try cash/balance methods
+    for name in ("get_balance", "get_balances", "get_collateral", "get_account", "get_profile"):
+        if not hasattr(client, name):
+            continue
+        try:
+            resp = getattr(client, name)()
+            v = _extract_cash_from_any(resp)
+            if v is not None:
+                cash = round(float(v), 6)
+                break
+        except Exception:
+            continue
+
+    # Try positions methods
+    for name in ("get_positions", "get_open_positions", "get_trades"):
+        if not hasattr(client, name):
+            continue
+        try:
+            resp = getattr(client, name)()
+            rows = _extract_positions_from_any(resp)
+            if rows:
+                positions = rows
+                break
+        except Exception:
+            continue
+
+    return {
+        "ok": True,
+        "cash_available": cash,
+        "positions": positions,
+    }
+
+
 def _claim_available(client) -> dict[str, Any]:
     """
     Best-effort claim adapter across py-clob-client versions.
@@ -384,6 +456,8 @@ def main() -> int:
 
         if action == "claim":
             out = _claim_available(client)
+        elif action == "account_state":
+            out = _account_state(client)
         elif action in {"buy", "sell"}:
             symbol = str(payload.get("symbol", "")).strip().upper()
             market_ts = int(payload.get("market_ts"))
@@ -402,7 +476,7 @@ def main() -> int:
                 contracts = float(payload.get("contracts"))
                 out = _place_limit_sell(client, token_id, limit_price, contracts)
         else:
-            out = _fail("action must be buy, sell, or claim")
+            out = _fail("action must be buy, sell, claim, or account_state")
 
     except Exception as e:
         out = _fail(str(e))

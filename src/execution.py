@@ -48,6 +48,9 @@ class BaseExecutionEngine:
     def claim_available_funds(self) -> dict:
         return {"ok": True, "claimed": 0.0, "details": "not_supported"}
 
+    def get_account_state(self) -> dict:
+        return {"ok": True, "cash_available": None, "positions": []}
+
 
 class PaperExecutionEngine(BaseExecutionEngine):
     def enter_position(
@@ -70,6 +73,9 @@ class PaperExecutionEngine(BaseExecutionEngine):
         now_ts: int,
     ) -> Position:
         return portfolio.close_position(p.position_id, limit_price, now_ts)
+
+    def get_account_state(self) -> dict:
+        return {"ok": True, "cash_available": None, "positions": []}
 
 
 class LiveExecutionBridgeEngine(BaseExecutionEngine):
@@ -183,3 +189,6 @@ class LiveExecutionBridgeEngine(BaseExecutionEngine):
 
     def claim_available_funds(self) -> dict:
         return self._call_bridge({"action": "claim"})
+
+    def get_account_state(self) -> dict:
+        return self._call_bridge({"action": "account_state"})
