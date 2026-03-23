@@ -18,7 +18,7 @@ Implemented and runnable with:
 ## Strategy (as currently coded)
 - Markets: BTC + ETH 5-minute up/down
 - Uses only most current active market per symbol
-- Entry polling starts only in final 80 seconds (via `PMB2_ENTRY_POLL_START_SECONDS=80`)
+- Entry polling starts at the beginning of the final 70-second window
 - Entry window: final 70 seconds of market (via `PMB2_FINAL_ENTRY_WINDOW_SECONDS=70`)
 - Entry trigger: once either side >= 0.75, buy higher side
 - Sizing: proportional-only `10% cash` (no fixed minimum), then capped by risk limits

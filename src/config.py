@@ -8,7 +8,6 @@ class BotConfig:
     starting_cash: float = float(os.getenv("PMB2_STARTING_CASH", "1000"))
     poll_seconds: float = float(os.getenv("PMB2_POLL_SECONDS", "2"))
     hot_poll_seconds: float = float(os.getenv("PMB2_HOT_POLL_SECONDS", "1.0"))
-    pre_entry_poll_seconds: float = float(os.getenv("PMB2_PRE_ENTRY_POLL_SECONDS", "3.0"))
 
     market_interval_seconds: int = 300
     final_entry_window_seconds: int = 50
@@ -38,8 +37,7 @@ class BotConfig:
     min_buy_fill_price: float = float(os.getenv("PMB2_MIN_BUY_FILL_PRICE", "0.74"))
     pause_on_buy_fill_below_min: bool = os.getenv("PMB2_PAUSE_ON_BUY_FILL_BELOW_MIN", "1") == "1"
 
-    # Entry polling gate (only evaluate entries in final N seconds)
-    entry_poll_start_seconds: int = int(os.getenv("PMB2_ENTRY_POLL_START_SECONDS", "80"))
+    # Entry polling starts at final_entry_window_seconds boundary.
 
     # Live auto-claim controls
     auto_claim_enabled: bool = os.getenv("PMB2_AUTO_CLAIM_ENABLED", "1") == "1"

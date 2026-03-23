@@ -296,7 +296,7 @@ def run() -> None:
                 append_jsonl(events_log, {"type": "skip_future_market", "ts": now_ts, "symbol": symbol, "market_ts": market.market_ts})
                 continue
 
-            poll_start = cfg.market_interval_seconds - cfg.entry_poll_start_seconds
+            poll_start = cfg.market_interval_seconds - cfg.final_entry_window_seconds
             if elapsed < poll_start:
                 continue
 
@@ -530,8 +530,6 @@ def run() -> None:
         sec_in_market = now_ts % cfg.market_interval_seconds
         if sec_in_market >= (cfg.market_interval_seconds - cfg.final_entry_window_seconds):
             sleep_s = cfg.hot_poll_seconds
-        elif sec_in_market >= (cfg.market_interval_seconds - cfg.entry_poll_start_seconds):
-            sleep_s = cfg.pre_entry_poll_seconds
         else:
             sleep_s = cfg.poll_seconds
 
