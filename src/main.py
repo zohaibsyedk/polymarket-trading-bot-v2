@@ -278,6 +278,17 @@ def run() -> None:
                 },
             })
             if entry.should_enter and entry.side and entry.price and entry.size_usd:
+                if float(entry.price) < cfg.min_buy_trigger_price:
+                    append_jsonl(events_log, {
+                        "type": "entry_blocked_min_buy_trigger",
+                        "ts": now_ts,
+                        "symbol": symbol,
+                        "market_ts": market.market_ts,
+                        "entry_price": float(entry.price),
+                        "min_buy_trigger_price": cfg.min_buy_trigger_price,
+                    })
+                    continue
+
                 intended_size = min(entry.size_usd, cfg.max_position_usd)
                 if portfolio.open_position_value + intended_size > cfg.max_total_open_usd:
                     append_jsonl(events_log, {
@@ -309,6 +320,24 @@ def run() -> None:
                         "error": str(e),
                     })
                     continue
+
+                if p.entry_price < cfg.min_buy_fill_price:
+                    warn = (
+                        "[Buy Fill Guard] "
+                        f"Filled at {p.entry_price:.4f} below minimum {cfg.min_buy_fill_price:.4f}."
+                    )
+                    send(warn)
+                    append_jsonl(events_log, {
+                        "type": "buy_fill_below_min",
+                        "ts": now_ts,
+                        "symbol": symbol,
+                        "market_ts": market.market_ts,
+                        "filled_price": p.entry_price,
+                        "min_buy_fill_price": cfg.min_buy_fill_price,
+                    })
+                    if cfg.pause_on_buy_fill_below_min:
+                        manual_entries_paused = True
+                        send("[Trading] Entries paused due to buy-fill guard.")
 
                 send(format_entry_message(p, portfolio))
                 append_jsonl(trades_log, {

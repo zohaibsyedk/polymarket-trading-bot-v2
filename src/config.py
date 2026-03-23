@@ -30,6 +30,11 @@ class BotConfig:
     max_position_usd: float = float(os.getenv("PMB2_MAX_POSITION_USD", "100"))
     max_total_open_usd: float = float(os.getenv("PMB2_MAX_TOTAL_OPEN_USD", "300"))
 
+    # Buy-floor controls
+    min_buy_trigger_price: float = float(os.getenv("PMB2_MIN_BUY_TRIGGER_PRICE", "0.74"))
+    min_buy_fill_price: float = float(os.getenv("PMB2_MIN_BUY_FILL_PRICE", "0.74"))
+    pause_on_buy_fill_below_min: bool = os.getenv("PMB2_PAUSE_ON_BUY_FILL_BELOW_MIN", "1") == "1"
+
     # Live auto-claim controls
     auto_claim_enabled: bool = os.getenv("PMB2_AUTO_CLAIM_ENABLED", "1") == "1"
     auto_claim_interval_s: int = int(os.getenv("PMB2_AUTO_CLAIM_INTERVAL_S", "90"))
