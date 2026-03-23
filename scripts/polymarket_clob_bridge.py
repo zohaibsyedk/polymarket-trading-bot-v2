@@ -36,6 +36,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 import urllib.parse
 import urllib.request
 from typing import Any
@@ -115,6 +116,112 @@ def _init_clob_client():
     return client
 
 
+def _to_f(v: Any) -> float | None:
+    try:
+        if v is None:
+            return None
+        return float(v)
+    except Exception:
+        return None
+
+
+def _extract_order_id(resp: dict[str, Any]) -> str | None:
+    return (
+        (resp or {}).get("orderID")
+        or (resp or {}).get("id")
+        or (resp or {}).get("order_id")
+        or (resp or {}).get("orderId")
+    )
+
+
+def _extract_order_state(order: dict[str, Any]) -> tuple[float, float, float | None, str | None]:
+    size = _to_f(order.get("size") or order.get("original_size") or order.get("initial_size")) or 0.0
+    filled = _to_f(order.get("size_matched") or order.get("filled_size") or order.get("matched_size") or order.get("filled")) or 0.0
+    avg_price = _to_f(order.get("avg_price") or order.get("average_price") or order.get("price"))
+    status = str(order.get("status") or order.get("state") or "").lower() or None
+    return size, filled, avg_price, status
+
+
+def _get_order_update(client, order_id: str) -> dict[str, Any] | None:
+    # Best-effort across py-clob-client versions.
+    candidates = [
+        ("get_order", lambda: client.get_order(order_id)),
+        ("get_order_by_id", lambda: client.get_order_by_id(order_id)),
+    ]
+    for name, fn in candidates:
+        if not hasattr(client, name):
+            continue
+        try:
+            out = fn()
+            if isinstance(out, dict):
+                if "order" in out and isinstance(out["order"], dict):
+                    return out["order"]
+                return out
+        except Exception:
+            pass
+
+    if hasattr(client, "get_orders"):
+        try:
+            out = client.get_orders()
+            if isinstance(out, list):
+                for o in out:
+                    if str(o.get("id") or o.get("orderID") or o.get("order_id")) == str(order_id):
+                        return o
+            elif isinstance(out, dict):
+                for key in ("orders", "data"):
+                    rows = out.get(key)
+                    if isinstance(rows, list):
+                        for o in rows:
+                            if str(o.get("id") or o.get("orderID") or o.get("order_id")) == str(order_id):
+                                return o
+        except Exception:
+            pass
+
+    return None
+
+
+def _cancel_order_best_effort(client, order_id: str) -> None:
+    for name in ("cancel", "cancel_order", "cancel_orders"):
+        if not hasattr(client, name):
+            continue
+        try:
+            fn = getattr(client, name)
+            if name == "cancel_orders":
+                fn([order_id])
+            else:
+                fn(order_id)
+            return
+        except Exception:
+            continue
+
+
+def _wait_for_fill(client, order_id: str, requested_size: float) -> tuple[float, float | None, dict[str, Any] | None]:
+    timeout_s = float(os.getenv("POLYMARKET_ORDER_POLL_TIMEOUT_S", "8"))
+    interval_s = float(os.getenv("POLYMARKET_ORDER_POLL_INTERVAL_S", "0.4"))
+
+    deadline = time.time() + max(0.5, timeout_s)
+    last_order = None
+
+    while time.time() < deadline:
+        order = _get_order_update(client, order_id)
+        if order:
+            last_order = order
+            _, filled, avg_price, status = _extract_order_state(order)
+            if status in {"filled", "matched", "executed"}:
+                return filled, avg_price, last_order
+            if requested_size > 0 and filled >= (requested_size - 1e-9):
+                return filled, avg_price, last_order
+        time.sleep(max(0.1, interval_s))
+
+    if os.getenv("POLYMARKET_CANCEL_UNFILLED_ON_TIMEOUT", "1") == "1":
+        _cancel_order_best_effort(client, order_id)
+
+    if last_order:
+        _, filled, avg_price, _ = _extract_order_state(last_order)
+        return filled, avg_price, last_order
+    return 0.0, None, None
+
+
 def _place_limit_buy(client, token_id: str, limit_price: float, size_usd: float) -> dict[str, Any]:
     try:
         from py_clob_client.clob_types import OrderArgs, OrderType
@@ -127,28 +234,43 @@ def _place_limit_buy(client, token_id: str, limit_price: float, size_usd: float)
     if size_usd <= 0:
         raise RuntimeError("size_usd must be > 0")
 
-    # Approx contracts at limit price. Exchange may fill partially.
-    contracts = round(size_usd / limit_price, 6)
+    requested_contracts = round(size_usd / limit_price, 6)
 
     order = OrderArgs(
         price=float(limit_price),
-        size=float(contracts),
+        size=float(requested_contracts),
         side=BUY,
         token_id=str(token_id),
     )
     signed = client.create_order(order)
     resp = client.post_order(signed, OrderType.GTC)
+    order_id = _extract_order_id(resp or {})
 
-    # Post-order response shape can vary by client version.
-    order_id = (resp or {}).get("orderID") or (resp or {}).get("id") or (resp or {}).get("order_id")
+    if not order_id:
+        raise RuntimeError(f"missing_order_id_in_response: {resp}")
+
+    filled_contracts, avg_price, last_order = _wait_for_fill(client, str(order_id), requested_contracts)
+    min_fill_pct = float(os.getenv("POLYMARKET_MIN_FILL_PCT", "0.95"))
+    min_contracts = requested_contracts * max(0.0, min(1.0, min_fill_pct))
+
+    if filled_contracts <= 0:
+        raise RuntimeError(f"buy_unfilled: order_id={order_id}")
+    if filled_contracts < min_contracts:
+        raise RuntimeError(
+            f"buy_partial_fill_below_threshold: filled={filled_contracts} requested={requested_contracts} min_fill_pct={min_fill_pct}"
+        )
+
+    fill_price = float(avg_price) if avg_price and avg_price > 0 else float(limit_price)
+    cost = round(filled_contracts * fill_price, 6)
 
     return {
         "ok": True,
-        "fill_price": float(limit_price),
-        "contracts": float(contracts),
-        "cost": round(float(contracts) * float(limit_price), 6),
+        "fill_price": round(fill_price, 6),
+        "contracts": round(float(filled_contracts), 6),
+        "cost": cost,
         "order_id": order_id,
         "raw": resp,
+        "order": last_order,
     }
 
 
@@ -164,23 +286,42 @@ def _place_limit_sell(client, token_id: str, limit_price: float, contracts: floa
     if contracts <= 0:
         raise RuntimeError("contracts must be > 0")
 
+    requested_contracts = float(contracts)
+
     order = OrderArgs(
         price=float(limit_price),
-        size=float(contracts),
+        size=float(requested_contracts),
         side=SELL,
         token_id=str(token_id),
     )
     signed = client.create_order(order)
     resp = client.post_order(signed, OrderType.GTC)
+    order_id = _extract_order_id(resp or {})
 
-    order_id = (resp or {}).get("orderID") or (resp or {}).get("id") or (resp or {}).get("order_id")
+    if not order_id:
+        raise RuntimeError(f"missing_order_id_in_response: {resp}")
+
+    filled_contracts, avg_price, last_order = _wait_for_fill(client, str(order_id), requested_contracts)
+    min_fill_pct = float(os.getenv("POLYMARKET_MIN_FILL_PCT", "0.95"))
+    min_contracts = requested_contracts * max(0.0, min(1.0, min_fill_pct))
+
+    if filled_contracts <= 0:
+        raise RuntimeError(f"sell_unfilled: order_id={order_id}")
+    if filled_contracts < min_contracts:
+        raise RuntimeError(
+            f"sell_partial_fill_below_threshold: filled={filled_contracts} requested={requested_contracts} min_fill_pct={min_fill_pct}"
+        )
+
+    fill_price = float(avg_price) if avg_price and avg_price > 0 else float(limit_price)
+    proceeds = round(filled_contracts * fill_price, 6)
 
     return {
         "ok": True,
-        "fill_price": float(limit_price),
-        "proceeds": round(float(contracts) * float(limit_price), 6),
+        "fill_price": round(fill_price, 6),
+        "proceeds": proceeds,
         "order_id": order_id,
         "raw": resp,
+        "order": last_order,
     }
 
 

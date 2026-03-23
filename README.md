@@ -43,6 +43,13 @@ python3 -m src.main
 `PMB2_LIVE_BRIDGE_CMD` must read JSON from stdin and return JSON on stdout.
 A ready bridge is provided at `scripts/polymarket_clob_bridge.py`.
 
+Bridge now tracks **actual order updates/fills** (polling order status) and only returns success after sufficient fill.
+Tune with env:
+- `POLYMARKET_ORDER_POLL_TIMEOUT_S` (default 8)
+- `POLYMARKET_ORDER_POLL_INTERVAL_S` (default 0.4)
+- `POLYMARKET_MIN_FILL_PCT` (default 0.95)
+- `POLYMARKET_CANCEL_UNFILLED_ON_TIMEOUT` (default 1)
+
 Buy payload sent by bot:
 ```json
 {"action":"buy","symbol":"BTC","market_ts":123,"side":"UP","limit_price":0.81,"size_usd":50}
