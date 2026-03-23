@@ -109,6 +109,7 @@ Manual entry control via Telegram:
 - `Log` → bot ledger summary
 - `Market` → current BTC/ETH market links
 - `Snapshot` → current UP/DOWN prices
+- Order notifications: Telegram messages on order placement attempts and explicit fill failures
 - `Poly` → live account summary:
   - Available cash
   - Portfolio value

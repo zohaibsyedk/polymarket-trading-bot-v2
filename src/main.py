@@ -308,6 +308,14 @@ def run() -> None:
                         "max_total_open_usd": cfg.max_total_open_usd,
                     })
                     continue
+                send(
+                    "[Order Placed] "
+                    f"[{symbol} {entry.side}] "
+                    f"[Market: {market.slug}] "
+                    f"[Limit: {float(entry.price):.4f}] "
+                    f"[Size USD: {float(intended_size):.2f}]"
+                )
+
                 try:
                     p = engine.enter_position(
                         portfolio=portfolio,
@@ -319,13 +327,22 @@ def run() -> None:
                         now_ts=now_ts,
                     )
                 except Exception as e:
+                    err = str(e)
+                    send(
+                        "[Fill Failed] "
+                        f"[{symbol} {entry.side}] "
+                        f"[Market: {market.slug}] "
+                        f"[Limit: {float(entry.price):.4f}] "
+                        f"[Size USD: {float(intended_size):.2f}] "
+                        f"[Error: {err}]"
+                    )
                     append_jsonl(events_log, {
                         "type": "entry_failed",
                         "ts": now_ts,
                         "symbol": symbol,
                         "market_ts": market.market_ts,
                         "slug": market.slug,
-                        "error": str(e),
+                        "error": err,
                     })
                     continue
 
@@ -367,6 +384,13 @@ def run() -> None:
                 side_liquidity_px = m.bid_up_price if p.side == "UP" else m.bid_down_price
                 stop_loss_price = round(p.entry_price * cfg.stop_loss_pct_of_entry, 6)
                 if side_price <= stop_loss_price and side_liquidity_px is not None and side_liquidity_px > 0:
+                    send(
+                        "[Order Placed] "
+                        f"[{p.symbol} EXIT {p.side}] "
+                        f"[Reason: STOP_LOSS] "
+                        f"[Limit: {float(side_liquidity_px):.4f}] "
+                        f"[Contracts: {float(p.contracts):.4f}]"
+                    )
                     try:
                         closed = engine.exit_position(
                             portfolio=portfolio,
@@ -375,12 +399,21 @@ def run() -> None:
                             now_ts=now_ts,
                         )
                     except Exception as e:
+                        err = str(e)
+                        send(
+                            "[Fill Failed] "
+                            f"[{p.symbol} EXIT {p.side}] "
+                            f"[Reason: STOP_LOSS] "
+                            f"[Limit: {float(side_liquidity_px):.4f}] "
+                            f"[Contracts: {float(p.contracts):.4f}] "
+                            f"[Error: {err}]"
+                        )
                         append_jsonl(events_log, {
                             "type": "exit_failed",
                             "ts": now_ts,
                             "position_id": p.position_id,
                             "reason": "stop_loss",
-                            "error": str(e),
+                            "error": err,
                         })
                         continue
 
@@ -400,6 +433,13 @@ def run() -> None:
             payout = resolve_settlement_payout(p.symbol, p.market_ts, p.side)
             if payout is None:
                 continue
+            send(
+                "[Order Placed] "
+                f"[{p.symbol} EXIT {p.side}] "
+                f"[Reason: SETTLEMENT] "
+                f"[Limit/Payout: {float(payout):.4f}] "
+                f"[Contracts: {float(p.contracts):.4f}]"
+            )
             try:
                 closed = engine.exit_position(
                     portfolio=portfolio,
@@ -408,12 +448,21 @@ def run() -> None:
                     now_ts=now_ts,
                 )
             except Exception as e:
+                err = str(e)
+                send(
+                    "[Fill Failed] "
+                    f"[{p.symbol} EXIT {p.side}] "
+                    f"[Reason: SETTLEMENT] "
+                    f"[Limit/Payout: {float(payout):.4f}] "
+                    f"[Contracts: {float(p.contracts):.4f}] "
+                    f"[Error: {err}]"
+                )
                 append_jsonl(events_log, {
                     "type": "exit_failed",
                     "ts": now_ts,
                     "position_id": p.position_id,
                     "reason": "market_settlement",
-                    "error": str(e),
+                    "error": err,
                 })
                 continue
 
