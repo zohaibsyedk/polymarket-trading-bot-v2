@@ -7,7 +7,7 @@ Implemented and runnable with:
 - Strategy engine (current-market only)
 - Paper + live execution modes
 - Live CLOB bridge (`scripts/polymarket_clob_bridge.py`)
-- Actual fill tracking via order polling
+- Optional fill polling (can be disabled for lower latency)
 - Auto-claim loop (live)
 - Live account reconciliation + entry pause on drift
 - Telegram control commands (`Log`, `Market`, `Snapshot`, `Poly`, `Status`, `Pause`, `Resume`, `Stop`)
@@ -84,6 +84,7 @@ PMB2_MIN_BUY_TRIGGER_PRICE=0.74
 PMB2_MIN_BUY_FILL_PRICE=0.74
 PMB2_PAUSE_ON_BUY_FILL_BELOW_MIN=1
 
+POLYMARKET_DISABLE_FILL_POLLING=0
 POLYMARKET_ORDER_POLL_TIMEOUT_S=8
 POLYMARKET_ORDER_POLL_INTERVAL_S=0.4
 POLYMARKET_MIN_FILL_PCT=0.95

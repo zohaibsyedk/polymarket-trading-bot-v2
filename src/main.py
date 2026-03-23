@@ -45,6 +45,7 @@ def run() -> None:
     trading_paused_by_reconcile = False
     manual_entries_paused = False
     latest_live_account: dict = {}
+    last_market_bucket_seen: int | None = None
 
     # Startup sync in live mode: seed bot cash/portfolio view from account state.
     if cfg.trading_mode == "live":
@@ -93,6 +94,34 @@ def run() -> None:
     while not stop_requested:
         now_ts = int(time.time())
         window = current_5m_window(now_ts)
+
+        # market rollover update (start of following market)
+        if cfg.trading_mode == "live":
+            if last_market_bucket_seen is None:
+                last_market_bucket_seen = window.ts_bucket
+            elif window.ts_bucket != last_market_bucket_seen:
+                last_market_bucket_seen = window.ts_bucket
+                try:
+                    acct = engine.get_account_state()
+                    cash = acct.get("cash_available")
+                    port = acct.get("portfolio_value")
+                    if port is None and cash is not None:
+                        port = cash
+                    if cash is not None or port is not None:
+                        cash_f = float(cash) if cash is not None else 0.0
+                        port_f = float(port) if port is not None else cash_f
+                        send(
+                            "[Market Rollover Update] "
+                            f"[Cash: ${cash_f:.4f}] "
+                            f"[Portfolio: ${port_f:.4f}] "
+                            f"[Position Value: ${port_f - cash_f:.4f}]"
+                        )
+                except Exception as e:
+                    append_jsonl(events_log, {
+                        "type": "rollover_update_failed",
+                        "ts": now_ts,
+                        "error": str(e),
+                    })
 
         # live-mode auto-claim checks
         if cfg.trading_mode == "live" and cfg.auto_claim_enabled:

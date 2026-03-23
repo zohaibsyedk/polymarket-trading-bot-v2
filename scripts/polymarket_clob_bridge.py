@@ -339,6 +339,10 @@ def _quantize_sell_contracts(contracts: float, order_type_name: str) -> float:
     return round(float(contracts), 6)
 
 
+def _fill_polling_disabled() -> bool:
+    return os.getenv("POLYMARKET_DISABLE_FILL_POLLING", "0") == "1"
+
+
 def _place_limit_buy(client, token_id: str, limit_price: float, size_usd: float) -> dict[str, Any]:
     try:
         from py_clob_client.clob_types import MarketOrderArgs, OrderArgs
@@ -363,14 +367,24 @@ def _place_limit_buy(client, token_id: str, limit_price: float, size_usd: float)
         # Use market-order builder for market-style execution; amount is collateral for BUY.
         order = MarketOrderArgs(
             token_id=str(token_id),
-            amount=float(_size_usd_q),
+            amount=float(round(_size_usd_q, 2)),
             side=BUY,
-            price=float(limit_price),
+            price=float(round(limit_price, 4)),
         )
-        signed = client.create_market_order(order)
+        try:
+            signed = client.create_market_order(order)
+        except Exception:
+            # Fallback to regular order builder with quantized size if market builder rejects precision.
+            order2 = OrderArgs(
+                price=float(round(limit_price, 4)),
+                size=float(round(requested_contracts, 4)),
+                side=BUY,
+                token_id=str(token_id),
+            )
+            signed = client.create_order(order2)
     else:
         order = OrderArgs(
-            price=float(limit_price),
+            price=float(round(limit_price, 4)),
             size=float(requested_contracts),
             side=BUY,
             token_id=str(token_id),
@@ -382,6 +396,19 @@ def _place_limit_buy(client, token_id: str, limit_price: float, size_usd: float)
 
     if not order_id:
         raise RuntimeError(f"missing_order_id_in_response: {resp}")
+
+    if _fill_polling_disabled():
+        est_contracts = float(requested_contracts)
+        est_price = float(limit_price)
+        return {
+            "ok": True,
+            "fill_price": round(est_price, 6),
+            "contracts": round(est_contracts, 6),
+            "cost": round(est_contracts * est_price, 6),
+            "order_id": order_id,
+            "raw": resp,
+            "pending_fill": True,
+        }
 
     filled_contracts, avg_price, last_order = _wait_for_fill(client, str(order_id), requested_contracts)
     min_fill_pct = float(os.getenv("POLYMARKET_MIN_FILL_PCT", "0.95"))
@@ -431,14 +458,23 @@ def _place_limit_sell(client, token_id: str, limit_price: float, contracts: floa
     if order_type_name in {"FAK", "FOK"}:
         order = MarketOrderArgs(
             token_id=str(token_id),
-            amount=float(requested_contracts),
+            amount=float(round(requested_contracts, 4)),
             side=SELL,
-            price=float(limit_price),
+            price=float(round(limit_price, 4)),
         )
-        signed = client.create_market_order(order)
+        try:
+            signed = client.create_market_order(order)
+        except Exception:
+            order2 = OrderArgs(
+                price=float(round(limit_price, 4)),
+                size=float(round(requested_contracts, 4)),
+                side=SELL,
+                token_id=str(token_id),
+            )
+            signed = client.create_order(order2)
     else:
         order = OrderArgs(
-            price=float(limit_price),
+            price=float(round(limit_price, 4)),
             size=float(requested_contracts),
             side=SELL,
             token_id=str(token_id),
@@ -450,6 +486,17 @@ def _place_limit_sell(client, token_id: str, limit_price: float, contracts: floa
 
     if not order_id:
         raise RuntimeError(f"missing_order_id_in_response: {resp}")
+
+    if _fill_polling_disabled():
+        est_price = float(limit_price)
+        return {
+            "ok": True,
+            "fill_price": round(est_price, 6),
+            "proceeds": round(float(requested_contracts) * est_price, 6),
+            "order_id": order_id,
+            "raw": resp,
+            "pending_fill": True,
+        }
 
     filled_contracts, avg_price, last_order = _wait_for_fill(client, str(order_id), requested_contracts)
     min_fill_pct = float(os.getenv("POLYMARKET_MIN_FILL_PCT", "0.95"))
