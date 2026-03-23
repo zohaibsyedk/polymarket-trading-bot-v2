@@ -468,38 +468,9 @@ def run() -> None:
             payout = resolve_settlement_payout(p.symbol, p.market_ts, p.side)
             if payout is None:
                 continue
-            send(
-                "[Order Placed] "
-                f"[{p.symbol} EXIT {p.side}] "
-                f"[Reason: SETTLEMENT] "
-                f"[Limit/Payout: {float(payout):.4f}] "
-                f"[Contracts: {float(p.contracts):.4f}]"
-            )
-            try:
-                closed = engine.exit_position(
-                    portfolio=portfolio,
-                    p=p,
-                    limit_price=payout,
-                    now_ts=now_ts,
-                )
-            except Exception as e:
-                err = str(e)
-                send(
-                    "[Fill Failed] "
-                    f"[{p.symbol} EXIT {p.side}] "
-                    f"[Reason: SETTLEMENT] "
-                    f"[Limit/Payout: {float(payout):.4f}] "
-                    f"[Contracts: {float(p.contracts):.4f}] "
-                    f"[Error: {err}]"
-                )
-                append_jsonl(events_log, {
-                    "type": "exit_failed",
-                    "ts": now_ts,
-                    "position_id": p.position_id,
-                    "reason": "market_settlement",
-                    "error": err,
-                })
-                continue
+            # Settlement does not require placing a CLOB order.
+            # Close position locally at resolved payout; claim/reconcile handles account cash updates.
+            closed = portfolio.close_position(p.position_id, payout, now_ts)
 
             send(format_exit_message(closed, portfolio))
             append_jsonl(trades_log, {
