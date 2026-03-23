@@ -147,21 +147,12 @@ def run() -> None:
                     }
 
                     cash_drift = None
+                    trading_paused_by_reconcile = False
                     if bridge_cash is not None:
                         bridge_cash = float(bridge_cash)
                         cash_drift = round(abs(bridge_cash - portfolio.cash_available), 6)
-                        if cash_drift > cfg.reconcile_cash_drift_usd:
-                            trading_paused_by_reconcile = True
-                            send(
-                                "[Reconcile Alert] "
-                                f"Cash drift ${cash_drift:.4f} exceeds threshold ${cfg.reconcile_cash_drift_usd:.4f}. "
-                                "Pausing new entries."
-                            )
-                        else:
-                            if trading_paused_by_reconcile:
-                                send("[Reconcile] Drift back within threshold. Resuming entries.")
-                            trading_paused_by_reconcile = False
-                            portfolio.cash_available = round(bridge_cash, 6)
+                        # Reconcile now logs drift but does not pause entries.
+                        portfolio.cash_available = round(bridge_cash, 6)
 
                     append_jsonl(events_log, {
                         "type": "reconcile_check",
