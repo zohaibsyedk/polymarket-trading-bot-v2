@@ -31,11 +31,17 @@ python3 -m src.main
 ### Live mode (bridge-based)
 ```bash
 export PMB2_TRADING_MODE=live
-export PMB2_LIVE_BRIDGE_CMD='/abs/path/to/polymarket_bridge.sh'
+export PMB2_LIVE_BRIDGE_CMD='python3 /abs/path/to/scripts/polymarket_clob_bridge.py'
+
+# bridge auth env
+export POLYMARKET_PRIVATE_KEY='0x...'
+export POLYMARKET_FUNDER='0x...'
+
 python3 -m src.main
 ```
 
 `PMB2_LIVE_BRIDGE_CMD` must read JSON from stdin and return JSON on stdout.
+A ready bridge is provided at `scripts/polymarket_clob_bridge.py`.
 
 Buy payload sent by bot:
 ```json
