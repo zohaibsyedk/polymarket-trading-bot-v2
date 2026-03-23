@@ -30,7 +30,7 @@ class ResolvedMarket:
 def _fetch_slug(slug: str) -> Optional[dict]:
     try:
         req = urllib.request.Request(GAMMA_BASE + slug, headers=UA)
-        with urllib.request.urlopen(req, timeout=12) as r:
+        with urllib.request.urlopen(req, timeout=3) as r:
             d = json.loads(r.read().decode())
         return d[0] if d else None
     except Exception:
@@ -54,7 +54,7 @@ def _parse_prices(v) -> tuple[Optional[float], Optional[float]]:
 def _best_ask_for_token(token_id: str) -> Optional[float]:
     try:
         req = urllib.request.Request(f"{CLOB_BASE}/book?token_id={token_id}", headers=UA)
-        with urllib.request.urlopen(req, timeout=8) as r:
+        with urllib.request.urlopen(req, timeout=2) as r:
             d = json.loads(r.read().decode())
         asks = d.get("asks") or []
         if not asks:
@@ -67,7 +67,7 @@ def _best_ask_for_token(token_id: str) -> Optional[float]:
 def _best_bid_for_token(token_id: str) -> Optional[float]:
     try:
         req = urllib.request.Request(f"{CLOB_BASE}/book?token_id={token_id}", headers=UA)
-        with urllib.request.urlopen(req, timeout=8) as r:
+        with urllib.request.urlopen(req, timeout=2) as r:
             d = json.loads(r.read().decode())
         bids = d.get("bids") or []
         if not bids:
@@ -84,7 +84,7 @@ def _market_price_for_token(token_id: str, side: str) -> Optional[float]:
             f"{CLOB_BASE}/price?token_id={token_id}&side={side}",
             headers=UA,
         )
-        with urllib.request.urlopen(req, timeout=8) as r:
+        with urllib.request.urlopen(req, timeout=2) as r:
             d = json.loads(r.read().decode())
         px = d.get("price")
         if px is None:
@@ -173,7 +173,7 @@ def resolve_current_market(symbol: str, bucket_ts: int, now_ts: int) -> Optional
     We prefer non-future buckets (<= now_ts). This avoids selecting the next
     interval too early, which can suppress valid entries in the current market.
     """
-    candidates = [bucket_ts, bucket_ts - 300, bucket_ts + 300]
+    candidates = [bucket_ts, bucket_ts - 300]
     resolved: list[ResolvedMarket] = []
     for ts in candidates:
         m = fetch_market(symbol, ts)

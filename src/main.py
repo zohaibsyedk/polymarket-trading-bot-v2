@@ -123,9 +123,18 @@ def run() -> None:
                         "error": str(e),
                     })
 
-        # live-mode auto-claim checks
+        # live-mode auto-claim checks (skip during final entry window to protect latency)
         if cfg.trading_mode == "live" and cfg.auto_claim_enabled:
-            if (now_ts - last_claim_check_ts) >= max(15, cfg.auto_claim_interval_s):
+            sec_in_market = now_ts % cfg.market_interval_seconds
+            in_final_entry_window = sec_in_market >= (cfg.market_interval_seconds - cfg.final_entry_window_seconds)
+            if in_final_entry_window:
+                append_jsonl(events_log, {
+                    "type": "claim_skipped_final_window",
+                    "ts": now_ts,
+                    "sec_in_market": sec_in_market,
+                    "final_entry_window_seconds": cfg.final_entry_window_seconds,
+                })
+            elif (now_ts - last_claim_check_ts) >= max(15, cfg.auto_claim_interval_s):
                 last_claim_check_ts = now_ts
                 try:
                     claim = engine.claim_available_funds()
