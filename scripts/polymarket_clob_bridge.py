@@ -710,38 +710,58 @@ def _claim_available(client) -> dict[str, Any]:
     raise RuntimeError(f"claim_not_supported_or_failed: {last_err}")
 
 
+def _process_payload(payload: dict[str, Any], client) -> dict[str, Any]:
+    action = str(payload.get("action", "")).strip().lower()
+
+    if action == "claim":
+        return _claim_available(client)
+    if action == "account_state":
+        return _account_state(client)
+    if action in {"buy", "sell"}:
+        symbol = str(payload.get("symbol", "")).strip().upper()
+        market_ts = int(payload.get("market_ts"))
+        side = str(payload.get("side", "")).strip().upper()
+
+        token_id = str(payload.get("token_id") or "").strip()
+        if not token_id:
+            slug = _slug(symbol, market_ts)
+            market = _fetch_market(slug)
+            token_id = _token_id_for_side(market, side)
+
+        if action == "buy":
+            limit_price = float(payload.get("limit_price"))
+            size_usd = float(payload.get("size_usd"))
+            return _place_limit_buy(client, token_id, limit_price, size_usd)
+
+        limit_price = float(payload.get("limit_price"))
+        contracts = float(payload.get("contracts"))
+        return _place_limit_sell(client, token_id, limit_price, contracts)
+
+    return _fail("action must be buy, sell, claim, or account_state")
+
+
 def main() -> int:
+    daemon = "--daemon" in sys.argv
+
+    if daemon:
+        client = _init_clob_client()
+        for line in sys.stdin:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+                out = _process_payload(payload, client)
+            except Exception as e:
+                out = _fail(str(e))
+            sys.stdout.write(json.dumps(out) + "\n")
+            sys.stdout.flush()
+        return 0
+
     try:
         payload = _read_stdin_json()
-        action = str(payload.get("action", "")).strip().lower()
         client = _init_clob_client()
-
-        if action == "claim":
-            out = _claim_available(client)
-        elif action == "account_state":
-            out = _account_state(client)
-        elif action in {"buy", "sell"}:
-            symbol = str(payload.get("symbol", "")).strip().upper()
-            market_ts = int(payload.get("market_ts"))
-            side = str(payload.get("side", "")).strip().upper()
-
-            token_id = str(payload.get("token_id") or "").strip()
-            if not token_id:
-                slug = _slug(symbol, market_ts)
-                market = _fetch_market(slug)
-                token_id = _token_id_for_side(market, side)
-
-            if action == "buy":
-                limit_price = float(payload.get("limit_price"))
-                size_usd = float(payload.get("size_usd"))
-                out = _place_limit_buy(client, token_id, limit_price, size_usd)
-            else:
-                limit_price = float(payload.get("limit_price"))
-                contracts = float(payload.get("contracts"))
-                out = _place_limit_sell(client, token_id, limit_price, contracts)
-        else:
-            out = _fail("action must be buy, sell, claim, or account_state")
-
+        out = _process_payload(payload, client)
     except Exception as e:
         out = _fail(str(e))
 

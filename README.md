@@ -84,6 +84,10 @@ PMB2_MIN_BUY_TRIGGER_PRICE=0.74
 PMB2_MIN_BUY_FILL_PRICE=0.74
 PMB2_PAUSE_ON_BUY_FILL_BELOW_MIN=1
 
+PMB2_HOT_POLL_SECONDS=1.0
+PMB2_PRE_ENTRY_POLL_SECONDS=3.0
+PMB2_BRIDGE_PERSISTENT=1
+
 POLYMARKET_DISABLE_FILL_POLLING=0
 POLYMARKET_ORDER_POLL_TIMEOUT_S=8
 POLYMARKET_ORDER_POLL_INTERVAL_S=0.4
@@ -99,8 +103,8 @@ PMB2_RECONCILE_CASH_DRIFT_USD=1.0
 ```
 
 Reconcile behavior:
-- If account cash drift exceeds threshold, bot pauses **new entries**.
-- Exits continue to run.
+- Bot syncs/logs account drift and cash.
+- Reconcile/claim checks are skipped in the final entry window to protect order latency.
 
 Manual entry control via Telegram:
 - `Pause` / `Resume`

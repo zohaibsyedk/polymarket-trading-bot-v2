@@ -1,5 +1,6 @@
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from .config import BotConfig
 from .market_discovery import current_5m_window
 from .paper_engine import PortfolioState
@@ -31,7 +32,11 @@ def run() -> None:
     )
 
     if cfg.trading_mode == "live":
-        engine = LiveExecutionBridgeEngine(cfg.live_bridge_cmd, timeout_seconds=cfg.live_bridge_timeout_s)
+        engine = LiveExecutionBridgeEngine(
+            cfg.live_bridge_cmd,
+            timeout_seconds=cfg.live_bridge_timeout_s,
+            persistent=cfg.bridge_persistent,
+        )
     else:
         engine = PaperExecutionEngine()
 
@@ -217,10 +222,16 @@ def run() -> None:
 
         # resolve market map first so command `Market` has current links
         active = {}
-        for symbol in ("BTC", "ETH"):
-            market = resolve_current_market(symbol, window.ts_bucket, now_ts)
-            if market:
-                active[symbol] = market
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            futs = {ex.submit(resolve_current_market, symbol, window.ts_bucket, now_ts): symbol for symbol in ("BTC", "ETH")}
+            for fut in as_completed(futs):
+                symbol = futs[fut]
+                try:
+                    market = fut.result()
+                except Exception:
+                    market = None
+                if market:
+                    active[symbol] = market
 
         # Telegram command polling
         for chat_id, text in tg.poll_commands():
@@ -350,14 +361,6 @@ def run() -> None:
                         "max_total_open_usd": cfg.max_total_open_usd,
                     })
                     continue
-                send(
-                    "[Order Placed] "
-                    f"[{symbol} {entry.side}] "
-                    f"[Market: {market.slug}] "
-                    f"[Limit: {float(entry.price):.4f}] "
-                    f"[Size USD: {float(intended_size):.2f}]"
-                )
-
                 token_id = market.up_token_id if entry.side == "UP" else market.down_token_id
                 try:
                     p = engine.enter_position(
@@ -389,6 +392,15 @@ def run() -> None:
                         "error": err,
                     })
                     continue
+
+                send(
+                    "[Order Placed] "
+                    f"[{symbol} {entry.side}] "
+                    f"[Market: {market.slug}] "
+                    f"[Limit: {float(entry.price):.4f}] "
+                    f"[Size USD: {float(intended_size):.2f}] "
+                    f"[Order ID: {p.entry_order_id or 'n/a'}]"
+                )
 
                 if p.entry_price < cfg.min_buy_fill_price:
                     warn = (
@@ -428,13 +440,6 @@ def run() -> None:
                 side_liquidity_px = m.bid_up_price if p.side == "UP" else m.bid_down_price
                 stop_loss_price = round(p.entry_price * cfg.stop_loss_pct_of_entry, 6)
                 if side_price <= stop_loss_price and side_liquidity_px is not None and side_liquidity_px > 0:
-                    send(
-                        "[Order Placed] "
-                        f"[{p.symbol} EXIT {p.side}] "
-                        f"[Reason: STOP_LOSS] "
-                        f"[Limit: {float(side_liquidity_px):.4f}] "
-                        f"[Contracts: {float(p.contracts):.4f}]"
-                    )
                     try:
                         closed = engine.exit_position(
                             portfolio=portfolio,
@@ -461,6 +466,14 @@ def run() -> None:
                         })
                         continue
 
+                    send(
+                        "[Order Placed] "
+                        f"[{p.symbol} EXIT {p.side}] "
+                        f"[Reason: STOP_LOSS] "
+                        f"[Limit: {float(side_liquidity_px):.4f}] "
+                        f"[Contracts: {float(p.contracts):.4f}] "
+                        f"[Order ID: {closed.exit_order_id or 'n/a'}]"
+                    )
                     send(format_exit_message(closed, portfolio))
                     append_jsonl(trades_log, {
                         "type": "exit",
@@ -514,7 +527,15 @@ def run() -> None:
             "open_positions": len(portfolio.open_positions),
         })
 
-        time.sleep(cfg.poll_seconds)
+        sec_in_market = now_ts % cfg.market_interval_seconds
+        if sec_in_market >= (cfg.market_interval_seconds - cfg.final_entry_window_seconds):
+            sleep_s = cfg.hot_poll_seconds
+        elif sec_in_market >= (cfg.market_interval_seconds - cfg.entry_poll_start_seconds):
+            sleep_s = cfg.pre_entry_poll_seconds
+        else:
+            sleep_s = cfg.poll_seconds
+
+        time.sleep(max(0.1, float(sleep_s)))
 
     final_msg = handle_command("log", portfolio, live_account=latest_live_account)[0] + "\n[Bot stopped]"
     send(final_msg)

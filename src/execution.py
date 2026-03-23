@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
 from dataclasses import dataclass
 
 from .models import Position
@@ -100,13 +101,30 @@ class LiveExecutionBridgeEngine(BaseExecutionEngine):
       {"ok":true,"fill_price":0.52,"proceeds":32.098765,"order_id":"def"}
     """
 
-    def __init__(self, bridge_cmd: str, timeout_seconds: int = 15):
+    def __init__(self, bridge_cmd: str, timeout_seconds: int = 15, persistent: bool = True):
         if not bridge_cmd.strip():
             raise ValueError("PMB2_LIVE_BRIDGE_CMD is required in live mode")
         self.bridge_cmd = bridge_cmd
         self.timeout_seconds = timeout_seconds
+        self.persistent = persistent
+        self._proc = None
+        self._lock = threading.Lock()
 
-    def _call_bridge(self, payload: dict) -> dict:
+    def _ensure_proc(self):
+        if self._proc and self._proc.poll() is None:
+            return
+        cmd = f"{self.bridge_cmd} --daemon"
+        self._proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            shell=True,
+            bufsize=1,
+        )
+
+    def _call_bridge_once(self, payload: dict) -> dict:
         p = subprocess.run(
             self.bridge_cmd,
             input=json.dumps(payload),
@@ -125,6 +143,27 @@ class LiveExecutionBridgeEngine(BaseExecutionEngine):
         if not out.get("ok"):
             raise RuntimeError(f"bridge_order_rejected: {out}")
         return out
+
+    def _call_bridge(self, payload: dict) -> dict:
+        if not self.persistent:
+            return self._call_bridge_once(payload)
+
+        with self._lock:
+            self._ensure_proc()
+            assert self._proc and self._proc.stdin and self._proc.stdout
+            self._proc.stdin.write(json.dumps(payload) + "\n")
+            self._proc.stdin.flush()
+            line = self._proc.stdout.readline().strip()
+            if not line:
+                # fallback once if daemon protocol unavailable
+                return self._call_bridge_once(payload)
+            try:
+                out = json.loads(line)
+            except Exception as e:
+                raise RuntimeError(f"bridge_invalid_json: {e}; raw={line[:200]}") from e
+            if not out.get("ok"):
+                raise RuntimeError(f"bridge_order_rejected: {out}")
+            return out
 
     def enter_position(
         self,
