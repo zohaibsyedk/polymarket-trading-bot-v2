@@ -42,13 +42,14 @@ def run() -> None:
     last_claim_check_ts = 0
     last_reconcile_ts = 0
     trading_paused_by_reconcile = False
+    manual_entries_paused = False
     latest_live_account: dict = {}
 
     if cfg.telegram_enabled and cfg.telegram_bot_token:
         send(
             "[PolyMarket Trading Bot V2]\n"
             f"[Status: Started - Mode: {cfg.trading_mode.upper()}]\n"
-            "[Commands: Log, Market, Snapshot, Poly, Stop]"
+            "[Commands: Log, Market, Snapshot, Poly, Pause, Resume, Stop]"
         )
 
     while not stop_requested:
@@ -149,15 +150,29 @@ def run() -> None:
         for chat_id, text in tg.poll_commands():
             if cfg.telegram_chat_id and chat_id != cfg.telegram_chat_id:
                 continue
-            resp, should_stop = handle_command(
+            resp, should_stop, control_action = handle_command(
                 text,
                 portfolio,
                 {k: v.slug for k, v in active.items()},
                 {k: {"slug": v.slug, "up": v.up_price, "down": v.down_price} for k, v in active.items()},
                 latest_live_account,
+                manual_entries_paused or trading_paused_by_reconcile,
             )
+            if control_action == "pause":
+                manual_entries_paused = True
+            elif control_action == "resume":
+                manual_entries_paused = False
+
             tg.send(resp, chat_id=chat_id)
-            append_jsonl(events_log, {"type": "command", "ts": now_ts, "chat_id": chat_id, "text": text, "stop": should_stop})
+            append_jsonl(events_log, {
+                "type": "command",
+                "ts": now_ts,
+                "chat_id": chat_id,
+                "text": text,
+                "stop": should_stop,
+                "control_action": control_action,
+                "manual_entries_paused": manual_entries_paused,
+            })
             if should_stop:
                 stop_requested = True
 
@@ -171,13 +186,15 @@ def run() -> None:
 
         # ENTRY decisions only on current active markets
         for symbol, market in active.items():
-            if trading_paused_by_reconcile:
+            if trading_paused_by_reconcile or manual_entries_paused:
                 append_jsonl(events_log, {
-                    "type": "entry_blocked_reconcile_pause",
+                    "type": "entry_blocked_pause",
                     "ts": now_ts,
                     "symbol": symbol,
                     "market_ts": market.market_ts,
                     "slug": market.slug,
+                    "reconcile_pause": trading_paused_by_reconcile,
+                    "manual_pause": manual_entries_paused,
                 })
                 continue
             elapsed = now_ts - market.market_ts
@@ -346,7 +363,9 @@ def run() -> None:
             "portfolio_value": portfolio.portfolio_value,
             "open_positions": [p.to_dict() for p in portfolio.open_positions.values()],
             "realized_pnl": portfolio.realized_pnl(),
-            "paused_entries": trading_paused_by_reconcile,
+            "paused_entries": (trading_paused_by_reconcile or manual_entries_paused),
+            "paused_entries_reconcile": trading_paused_by_reconcile,
+            "paused_entries_manual": manual_entries_paused,
             "live_account": latest_live_account,
         }
         write_json(status_path, snapshot)

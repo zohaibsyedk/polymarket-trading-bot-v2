@@ -94,6 +94,8 @@ export PMB2_MAX_TOTAL_OPEN_USD=300
 - `Market` → current BTC/ETH market links
 - `Snapshot` → current UP/DOWN prices
 - `Poly` → account available cash, portfolio value, and position value (portfolio - cash)
+- `Pause` → pause new entries (exits still run)
+- `Resume` → resume new entries
 - `Stop` → final summary and graceful shutdown
 
 Enable Telegram:
