@@ -325,29 +325,84 @@ def _place_limit_sell(client, token_id: str, limit_price: float, contracts: floa
     }
 
 
+def _claim_available(client) -> dict[str, Any]:
+    """
+    Best-effort claim adapter across py-clob-client versions.
+    Returns amount if surfaced by API, else 0 with raw response.
+    """
+    methods = [
+        "claim",
+        "claim_funds",
+        "claim_rewards",
+        "redeem",
+        "redeem_positions",
+        "settle",
+    ]
+    last_err = None
+    for name in methods:
+        if not hasattr(client, name):
+            continue
+        fn = getattr(client, name)
+        try:
+            resp = fn()
+            claimed = 0.0
+            if isinstance(resp, dict):
+                for k in ("claimed", "amount", "claimed_amount", "total_claimed"):
+                    v = _to_f(resp.get(k))
+                    if v is not None:
+                        claimed = float(v)
+                        break
+            return {"ok": True, "claimed": round(float(claimed), 6), "raw": resp, "method": name}
+        except TypeError:
+            # Some versions may require kwargs; try with no-arg variants only for safety.
+            last_err = f"{name}: signature_mismatch"
+        except Exception as e:
+            last_err = f"{name}: {e}"
+
+    if hasattr(client, "get_claimable"):
+        try:
+            resp = client.get_claimable()
+            amt = 0.0
+            if isinstance(resp, dict):
+                for k in ("claimable", "amount", "total"):
+                    v = _to_f(resp.get(k))
+                    if v is not None:
+                        amt = float(v)
+                        break
+            return {"ok": True, "claimed": 0.0, "claimable": round(float(amt), 6), "raw": resp, "method": "get_claimable"}
+        except Exception as e:
+            last_err = f"get_claimable: {e}"
+
+    raise RuntimeError(f"claim_not_supported_or_failed: {last_err}")
+
+
 def main() -> int:
     try:
         payload = _read_stdin_json()
         action = str(payload.get("action", "")).strip().lower()
-        symbol = str(payload.get("symbol", "")).strip().upper()
-        market_ts = int(payload.get("market_ts"))
-        side = str(payload.get("side", "")).strip().upper()
-
-        slug = _slug(symbol, market_ts)
-        market = _fetch_market(slug)
-        token_id = _token_id_for_side(market, side)
         client = _init_clob_client()
 
-        if action == "buy":
-            limit_price = float(payload.get("limit_price"))
-            size_usd = float(payload.get("size_usd"))
-            out = _place_limit_buy(client, token_id, limit_price, size_usd)
-        elif action == "sell":
-            limit_price = float(payload.get("limit_price"))
-            contracts = float(payload.get("contracts"))
-            out = _place_limit_sell(client, token_id, limit_price, contracts)
+        if action == "claim":
+            out = _claim_available(client)
+        elif action in {"buy", "sell"}:
+            symbol = str(payload.get("symbol", "")).strip().upper()
+            market_ts = int(payload.get("market_ts"))
+            side = str(payload.get("side", "")).strip().upper()
+
+            slug = _slug(symbol, market_ts)
+            market = _fetch_market(slug)
+            token_id = _token_id_for_side(market, side)
+
+            if action == "buy":
+                limit_price = float(payload.get("limit_price"))
+                size_usd = float(payload.get("size_usd"))
+                out = _place_limit_buy(client, token_id, limit_price, size_usd)
+            else:
+                limit_price = float(payload.get("limit_price"))
+                contracts = float(payload.get("contracts"))
+                out = _place_limit_sell(client, token_id, limit_price, contracts)
         else:
-            out = _fail("action must be buy or sell")
+            out = _fail("action must be buy, sell, or claim")
 
     except Exception as e:
         out = _fail(str(e))

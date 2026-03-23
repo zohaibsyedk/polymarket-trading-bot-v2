@@ -45,6 +45,9 @@ class BaseExecutionEngine:
     ) -> Position:
         raise NotImplementedError
 
+    def claim_available_funds(self) -> dict:
+        return {"ok": True, "claimed": 0.0, "details": "not_supported"}
+
 
 class PaperExecutionEngine(BaseExecutionEngine):
     def enter_position(
@@ -177,3 +180,6 @@ class LiveExecutionBridgeEngine(BaseExecutionEngine):
             now_ts=now_ts,
             exit_order_id=fill.order_id,
         )
+
+    def claim_available_funds(self) -> dict:
+        return self._call_bridge({"action": "claim"})

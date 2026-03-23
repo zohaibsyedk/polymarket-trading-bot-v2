@@ -39,6 +39,7 @@ def run() -> None:
         tg.send(msg)
 
     stop_requested = False
+    last_claim_check_ts = 0
 
     if cfg.telegram_enabled and cfg.telegram_bot_token:
         send(
@@ -50,6 +51,27 @@ def run() -> None:
     while not stop_requested:
         now_ts = int(time.time())
         window = current_5m_window(now_ts)
+
+        # live-mode auto-claim checks
+        if cfg.trading_mode == "live" and cfg.auto_claim_enabled:
+            if (now_ts - last_claim_check_ts) >= max(15, cfg.auto_claim_interval_s):
+                last_claim_check_ts = now_ts
+                try:
+                    claim = engine.claim_available_funds()
+                    append_jsonl(events_log, {
+                        "type": "claim_check",
+                        "ts": now_ts,
+                        "result": claim,
+                    })
+                    claimed_amt = float(claim.get("claimed", 0.0) or 0.0)
+                    if claimed_amt > 0:
+                        send(f"[Claimed: ${claimed_amt:.4f}]")
+                except Exception as e:
+                    append_jsonl(events_log, {
+                        "type": "claim_failed",
+                        "ts": now_ts,
+                        "error": str(e),
+                    })
 
         # resolve market map first so command `Market` has current links
         active = {}

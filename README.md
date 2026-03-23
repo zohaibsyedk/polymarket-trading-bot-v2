@@ -50,6 +50,12 @@ Tune with env:
 - `POLYMARKET_MIN_FILL_PCT` (default 0.95)
 - `POLYMARKET_CANCEL_UNFILLED_ON_TIMEOUT` (default 1)
 
+Live mode also supports periodic auto-claim checks:
+- `PMB2_AUTO_CLAIM_ENABLED=1`
+- `PMB2_AUTO_CLAIM_INTERVAL_S=90`
+
+The bridge accepts `{"action":"claim"}` and will attempt supported claim/redeem methods on the CLOB client.
+
 Buy payload sent by bot:
 ```json
 {"action":"buy","symbol":"BTC","market_ts":123,"side":"UP","limit_price":0.81,"size_usd":50}

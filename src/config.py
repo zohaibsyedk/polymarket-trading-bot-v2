@@ -30,6 +30,10 @@ class BotConfig:
     max_position_usd: float = float(os.getenv("PMB2_MAX_POSITION_USD", "100"))
     max_total_open_usd: float = float(os.getenv("PMB2_MAX_TOTAL_OPEN_USD", "300"))
 
+    # Live auto-claim controls
+    auto_claim_enabled: bool = os.getenv("PMB2_AUTO_CLAIM_ENABLED", "1") == "1"
+    auto_claim_interval_s: int = int(os.getenv("PMB2_AUTO_CLAIM_INTERVAL_S", "90"))
+
     # Telegram runtime controls
     telegram_enabled: bool = os.getenv("PMB2_TELEGRAM_ENABLED", "0") == "1"
     telegram_bot_token: str = os.getenv("PMB2_TELEGRAM_BOT_TOKEN", "")
