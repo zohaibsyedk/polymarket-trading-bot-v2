@@ -247,6 +247,10 @@ def run() -> None:
                 append_jsonl(events_log, {"type": "skip_future_market", "ts": now_ts, "symbol": symbol, "market_ts": market.market_ts})
                 continue
 
+            poll_start = cfg.market_interval_seconds - cfg.entry_poll_start_seconds
+            if elapsed < poll_start:
+                continue
+
             if not market.accepting_orders:
                 append_jsonl(events_log, {"type": "skip_not_accepting_orders", "ts": now_ts, "symbol": symbol, "slug": market.slug})
                 continue

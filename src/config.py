@@ -35,6 +35,9 @@ class BotConfig:
     min_buy_fill_price: float = float(os.getenv("PMB2_MIN_BUY_FILL_PRICE", "0.74"))
     pause_on_buy_fill_below_min: bool = os.getenv("PMB2_PAUSE_ON_BUY_FILL_BELOW_MIN", "1") == "1"
 
+    # Entry polling gate (only evaluate entries in final N seconds)
+    entry_poll_start_seconds: int = int(os.getenv("PMB2_ENTRY_POLL_START_SECONDS", "80"))
+
     # Live auto-claim controls
     auto_claim_enabled: bool = os.getenv("PMB2_AUTO_CLAIM_ENABLED", "1") == "1"
     auto_claim_interval_s: int = int(os.getenv("PMB2_AUTO_CLAIM_INTERVAL_S", "90"))
