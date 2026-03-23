@@ -258,7 +258,7 @@ def _quantize_sell_contracts(contracts: float, order_type_name: str) -> float:
 
 def _place_limit_buy(client, token_id: str, limit_price: float, size_usd: float) -> dict[str, Any]:
     try:
-        from py_clob_client.clob_types import OrderArgs, OrderType
+        from py_clob_client.clob_types import MarketOrderArgs, OrderArgs
         from py_clob_client.order_builder.constants import BUY
     except Exception as e:
         raise RuntimeError("py-clob-client import mismatch; check installed version") from e
@@ -274,14 +274,27 @@ def _place_limit_buy(client, token_id: str, limit_price: float, size_usd: float)
     if requested_contracts <= 0:
         raise RuntimeError("buy_size_too_small_after_precision_rounding")
 
-    order = OrderArgs(
-        price=float(limit_price),
-        size=float(requested_contracts),
-        side=BUY,
-        token_id=str(token_id),
-    )
-    signed = client.create_order(order)
-    resp = client.post_order(signed, _resolve_order_type())
+    order_type = _resolve_order_type()
+
+    if order_type_name in {"FAK", "FOK"}:
+        # Use market-order builder for market-style execution; amount is collateral for BUY.
+        order = MarketOrderArgs(
+            token_id=str(token_id),
+            amount=float(_size_usd_q),
+            side=BUY,
+            price=float(limit_price),
+        )
+        signed = client.create_market_order(order)
+    else:
+        order = OrderArgs(
+            price=float(limit_price),
+            size=float(requested_contracts),
+            side=BUY,
+            token_id=str(token_id),
+        )
+        signed = client.create_order(order)
+
+    resp = client.post_order(signed, order_type)
     order_id = _extract_order_id(resp or {})
 
     if not order_id:
@@ -314,7 +327,7 @@ def _place_limit_buy(client, token_id: str, limit_price: float, size_usd: float)
 
 def _place_limit_sell(client, token_id: str, limit_price: float, contracts: float) -> dict[str, Any]:
     try:
-        from py_clob_client.clob_types import OrderArgs, OrderType
+        from py_clob_client.clob_types import MarketOrderArgs, OrderArgs
         from py_clob_client.order_builder.constants import SELL
     except Exception as e:
         raise RuntimeError("py-clob-client import mismatch; check installed version") from e
@@ -330,14 +343,26 @@ def _place_limit_sell(client, token_id: str, limit_price: float, contracts: floa
     if requested_contracts <= 0:
         raise RuntimeError("sell_size_too_small_after_precision_rounding")
 
-    order = OrderArgs(
-        price=float(limit_price),
-        size=float(requested_contracts),
-        side=SELL,
-        token_id=str(token_id),
-    )
-    signed = client.create_order(order)
-    resp = client.post_order(signed, _resolve_order_type())
+    order_type = _resolve_order_type()
+
+    if order_type_name in {"FAK", "FOK"}:
+        order = MarketOrderArgs(
+            token_id=str(token_id),
+            amount=float(requested_contracts),
+            side=SELL,
+            price=float(limit_price),
+        )
+        signed = client.create_market_order(order)
+    else:
+        order = OrderArgs(
+            price=float(limit_price),
+            size=float(requested_contracts),
+            side=SELL,
+            token_id=str(token_id),
+        )
+        signed = client.create_order(order)
+
+    resp = client.post_order(signed, order_type)
     order_id = _extract_order_id(resp or {})
 
     if not order_id:
