@@ -222,16 +222,38 @@ def _wait_for_fill(client, order_id: str, requested_size: float) -> tuple[float,
     return 0.0, None, None
 
 
+def _resolve_order_type_name() -> str:
+    raw = os.getenv("POLYMARKET_LIVE_ORDER_TYPE", "GTC").strip().upper()
+    if raw not in {"GTC", "FAK", "FOK", "GTD"}:
+        raise RuntimeError("POLYMARKET_LIVE_ORDER_TYPE must be one of GTC|FAK|FOK|GTD")
+    return raw
+
+
 def _resolve_order_type():
     try:
         from py_clob_client.clob_types import OrderType
     except Exception as e:
         raise RuntimeError("py-clob-client import mismatch; check installed version") from e
 
-    raw = os.getenv("POLYMARKET_LIVE_ORDER_TYPE", "GTC").strip().upper()
-    if raw not in {"GTC", "FAK", "FOK", "GTD"}:
-        raise RuntimeError("POLYMARKET_LIVE_ORDER_TYPE must be one of GTC|FAK|FOK|GTD")
-    return getattr(OrderType, raw)
+    return getattr(OrderType, _resolve_order_type_name())
+
+
+def _quantize_buy_size(limit_price: float, size_usd: float, order_type_name: str) -> tuple[float, float]:
+    # Polymarket market-style buys (FAK/FOK) are stricter on amount precision.
+    if order_type_name in {"FAK", "FOK"}:
+        size_usd_q = round(float(size_usd), 2)  # maker amount <= 2 decimals
+        contracts_q = round(size_usd_q / float(limit_price), 4)  # taker amount <= 4 decimals
+        return size_usd_q, contracts_q
+
+    size_usd_q = round(float(size_usd), 6)
+    contracts_q = round(size_usd_q / float(limit_price), 6)
+    return size_usd_q, contracts_q
+
+
+def _quantize_sell_contracts(contracts: float, order_type_name: str) -> float:
+    if order_type_name in {"FAK", "FOK"}:
+        return round(float(contracts), 4)
+    return round(float(contracts), 6)
 
 
 def _place_limit_buy(client, token_id: str, limit_price: float, size_usd: float) -> dict[str, Any]:
@@ -246,7 +268,11 @@ def _place_limit_buy(client, token_id: str, limit_price: float, size_usd: float)
     if size_usd <= 0:
         raise RuntimeError("size_usd must be > 0")
 
-    requested_contracts = round(size_usd / limit_price, 6)
+    order_type_name = _resolve_order_type_name()
+    _size_usd_q, requested_contracts = _quantize_buy_size(limit_price, size_usd, order_type_name)
+
+    if requested_contracts <= 0:
+        raise RuntimeError("buy_size_too_small_after_precision_rounding")
 
     order = OrderArgs(
         price=float(limit_price),
@@ -298,7 +324,11 @@ def _place_limit_sell(client, token_id: str, limit_price: float, contracts: floa
     if contracts <= 0:
         raise RuntimeError("contracts must be > 0")
 
-    requested_contracts = float(contracts)
+    order_type_name = _resolve_order_type_name()
+    requested_contracts = _quantize_sell_contracts(float(contracts), order_type_name)
+
+    if requested_contracts <= 0:
+        raise RuntimeError("sell_size_too_small_after_precision_rounding")
 
     order = OrderArgs(
         price=float(limit_price),
