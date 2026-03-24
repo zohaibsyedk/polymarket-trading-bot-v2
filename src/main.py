@@ -432,6 +432,8 @@ def run() -> None:
                     })
                     continue
                 token_id = market.up_token_id if entry.side == "UP" else market.down_token_id
+                # Buy-cap offset lets us pay above trigger price to improve FAK match odds.
+                effective_limit_price = min(0.9999, float(entry.price) + float(cfg.buy_cap_offset))
                 submit_t0 = time.perf_counter()
                 try:
                     p = engine.enter_position(
@@ -439,7 +441,7 @@ def run() -> None:
                         symbol=symbol,
                         market_ts=market.market_ts,
                         side=entry.side,
-                        limit_price=entry.price,
+                        limit_price=effective_limit_price,
                         size_usd=intended_size,
                         now_ts=now_ts,
                         token_id=token_id,
@@ -460,7 +462,8 @@ def run() -> None:
                         "[Fill Failed] "
                         f"[{symbol} {entry.side}] "
                         f"[Market: {market.slug}] "
-                        f"[Limit: {float(entry.price):.4f}] "
+                        f"[Limit: {float(effective_limit_price):.4f}] "
+                        f"[Trigger: {float(entry.price):.4f}] "
                         f"[Size USD: {float(intended_size):.2f}] "
                         f"[Error: {err}]"
                     )
@@ -489,7 +492,8 @@ def run() -> None:
                     "[Order Placed] "
                     f"[{symbol} {entry.side}] "
                     f"[Market: {market.slug}] "
-                    f"[Limit: {float(entry.price):.4f}] "
+                    f"[Limit: {float(effective_limit_price):.4f}] "
+                    f"[Trigger: {float(entry.price):.4f}] "
                     f"[Size USD: {float(intended_size):.2f}] "
                     f"[Order ID: {p.entry_order_id or 'n/a'}]"
                 )

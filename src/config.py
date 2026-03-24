@@ -38,6 +38,7 @@ class BotConfig:
     min_buy_trigger_price: float = float(os.getenv("PMB2_MIN_BUY_TRIGGER_PRICE", "0.74"))
     min_buy_fill_price: float = float(os.getenv("PMB2_MIN_BUY_FILL_PRICE", "0.74"))
     pause_on_buy_fill_below_min: bool = os.getenv("PMB2_PAUSE_ON_BUY_FILL_BELOW_MIN", "1") == "1"
+    buy_cap_offset: float = float(os.getenv("PMB2_BUY_CAP_OFFSET", "0.00"))
 
     # Entry polling starts at final_entry_window_seconds boundary.
 
