@@ -692,7 +692,9 @@ def _account_state(client) -> dict[str, Any]:
 def _claim_available(client) -> dict[str, Any]:
     """
     Best-effort claim adapter across py-clob-client versions.
-    Returns amount if surfaced by API, else 0 with raw response.
+
+    Important behavior: if no supported claim method succeeds, return ok=true with
+    claimed=0 and diagnostics instead of hard-failing the bot loop.
     """
     methods = [
         "claim",
@@ -702,7 +704,8 @@ def _claim_available(client) -> dict[str, Any]:
         "redeem_positions",
         "settle",
     ]
-    last_err = None
+    errors: list[str] = []
+
     for name in methods:
         if not hasattr(client, name):
             continue
@@ -718,11 +721,11 @@ def _claim_available(client) -> dict[str, Any]:
                         break
             return {"ok": True, "claimed": round(float(claimed), 6), "raw": resp, "method": name}
         except TypeError:
-            # Some versions may require kwargs; try with no-arg variants only for safety.
-            last_err = f"{name}: signature_mismatch"
+            errors.append(f"{name}: signature_mismatch")
         except Exception as e:
-            last_err = f"{name}: {e}"
+            errors.append(f"{name}: {e}")
 
+    # Fallback: query claimable amount if available.
     if hasattr(client, "get_claimable"):
         try:
             resp = client.get_claimable()
@@ -733,11 +736,26 @@ def _claim_available(client) -> dict[str, Any]:
                     if v is not None:
                         amt = float(v)
                         break
-            return {"ok": True, "claimed": 0.0, "claimable": round(float(amt), 6), "raw": resp, "method": "get_claimable"}
+            return {
+                "ok": True,
+                "claimed": 0.0,
+                "claimable": round(float(amt), 6),
+                "raw": resp,
+                "method": "get_claimable",
+                "claim_supported": False,
+                "note": "claim method unavailable in current client/account flow",
+                "errors": errors,
+            }
         except Exception as e:
-            last_err = f"get_claimable: {e}"
+            errors.append(f"get_claimable: {e}")
 
-    raise RuntimeError(f"claim_not_supported_or_failed: {last_err}")
+    return {
+        "ok": True,
+        "claimed": 0.0,
+        "claim_supported": False,
+        "note": "claim method unavailable in current client/account flow",
+        "errors": errors,
+    }
 
 
 def _process_payload(payload: dict[str, Any], client) -> dict[str, Any]:

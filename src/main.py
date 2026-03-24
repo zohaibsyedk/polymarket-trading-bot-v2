@@ -189,6 +189,8 @@ def run() -> None:
                     cash_f = float(cash) if cash is not None else 0.0
                     port_f = float(port) if port is not None else cash_f
                     claimed_amt = float(claim.get("claimed", 0.0) or 0.0)
+                    claimable_amt = float(claim.get("claimable", 0.0) or 0.0)
+                    claim_supported = bool(claim.get("claim_supported", True))
 
                     append_jsonl(events_log, {
                         "type": "claim_check",
@@ -197,11 +199,16 @@ def run() -> None:
                         "market_ts": window.ts_bucket,
                     })
 
+                    extra = ""
+                    if not claim_supported:
+                        extra = f"\n[Claim Unsupported: yes] [Claimable: ${claimable_amt:.4f}]"
+
                     send(
                         "[Auto Claim Update] "
                         f"[Claimed: ${claimed_amt:.4f}]\n"
                         f"[Cash: ${cash_f:.4f}]\n"
                         f"[Portfolio: ${port_f:.4f}]"
+                        f"{extra}"
                     )
                 except Exception as e:
                     append_jsonl(events_log, {
