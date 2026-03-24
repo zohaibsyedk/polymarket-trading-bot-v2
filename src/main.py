@@ -7,7 +7,6 @@ from .paper_engine import PortfolioState
 from .models import QuoteSnapshot
 from .strategy import evaluate_entry
 from .execution import PaperExecutionEngine, LiveExecutionBridgeEngine
-from .notifier import format_entry_message, format_exit_message
 from .logging_io import append_jsonl, write_json
 from .telegram_commands import handle_command
 from .telegram_io import TelegramIO
@@ -64,8 +63,24 @@ def run() -> None:
             return
         tg.send(msg)
 
+    def send_close_message(closed, market_slug: str, reason: str):
+        entry_total = float(closed.entry_cost)
+        close_total = float(closed.contracts) * float(closed.exit_price or 0.0)
+        pnl = close_total - entry_total
+        pnl_pct = (pnl / entry_total * 100.0) if entry_total > 0 else 0.0
+        send(
+            "[Position Closed] "
+            f"[Market: {market_slug}] "
+            f"[Coin: {closed.symbol}] "
+            f"[Side: {closed.side}] "
+            f"[Reason: {reason}]\n"
+            f"[Entry Total: ${entry_total:.4f}]\n"
+            f"[Closing Total: ${close_total:.4f}]\n"
+            f"[P/L: {pnl_pct:+.2f}%]"
+        )
+
     stop_requested = False
-    last_claim_check_ts = 0
+    last_claim_market_bucket_claimed: int | None = None
     last_reconcile_ts = 0
     trading_paused_by_reconcile = False
     manual_entries_paused = False
@@ -159,29 +174,35 @@ def run() -> None:
                         "error": str(e),
                     })
 
-        # live-mode auto-claim checks (skip during final entry window to protect latency)
+        # live-mode auto-claim at the 1-minute mark of each market.
         if cfg.trading_mode == "live" and cfg.auto_claim_enabled:
             sec_in_market = now_ts % cfg.market_interval_seconds
-            in_final_entry_window = sec_in_market >= (cfg.market_interval_seconds - cfg.final_entry_window_seconds)
-            if in_final_entry_window:
-                append_jsonl(events_log, {
-                    "type": "claim_skipped_final_window",
-                    "ts": now_ts,
-                    "sec_in_market": sec_in_market,
-                    "final_entry_window_seconds": cfg.final_entry_window_seconds,
-                })
-            elif (now_ts - last_claim_check_ts) >= max(15, cfg.auto_claim_interval_s):
-                last_claim_check_ts = now_ts
+            if sec_in_market >= 60 and last_claim_market_bucket_claimed != window.ts_bucket:
+                last_claim_market_bucket_claimed = window.ts_bucket
                 try:
                     claim = engine.claim_available_funds()
+                    acct = engine.get_account_state()
+                    cash = acct.get("cash_available")
+                    port = acct.get("portfolio_value")
+                    if port is None and cash is not None:
+                        port = cash
+                    cash_f = float(cash) if cash is not None else 0.0
+                    port_f = float(port) if port is not None else cash_f
+                    claimed_amt = float(claim.get("claimed", 0.0) or 0.0)
+
                     append_jsonl(events_log, {
                         "type": "claim_check",
                         "ts": now_ts,
                         "result": claim,
+                        "market_ts": window.ts_bucket,
                     })
-                    claimed_amt = float(claim.get("claimed", 0.0) or 0.0)
-                    if claimed_amt > 0:
-                        send(f"[Claimed: ${claimed_amt:.4f}]")
+
+                    send(
+                        "[Auto Claim Update] "
+                        f"[Claimed: ${claimed_amt:.4f}]\n"
+                        f"[Cash: ${cash_f:.4f}]\n"
+                        f"[Portfolio: ${port_f:.4f}]"
+                    )
                 except Exception as e:
                     append_jsonl(events_log, {
                         "type": "claim_failed",
@@ -459,15 +480,6 @@ def run() -> None:
                         "action": "entry_failed",
                         "ms": submit_ms,
                     })
-                    send(
-                        "[Fill Failed] "
-                        f"[{symbol} {entry.side}] "
-                        f"[Market: {market.slug}] "
-                        f"[Limit: {float(effective_limit_price):.4f}] "
-                        f"[Trigger: {float(entry.price):.4f}] "
-                        f"[Size USD: {float(intended_size):.2f}] "
-                        f"[Error: {err}]"
-                    )
                     append_jsonl(events_log, {
                         "type": "entry_failed",
                         "ts": now_ts,
@@ -489,15 +501,6 @@ def run() -> None:
                     "ms": submit_ms,
                 })
 
-                send(
-                    "[Order Placed] "
-                    f"[{symbol} {entry.side}] "
-                    f"[Market: {market.slug}] "
-                    f"[Limit: {float(effective_limit_price):.4f}] "
-                    f"[Trigger: {float(entry.price):.4f}] "
-                    f"[Size USD: {float(intended_size):.2f}] "
-                    f"[Order ID: {p.entry_order_id or 'n/a'}]"
-                )
 
                 if p.entry_price < cfg.min_buy_fill_price:
                     warn = (
@@ -517,7 +520,6 @@ def run() -> None:
                         manual_entries_paused = True
                         send("[Trading] Entries paused due to buy-fill guard.")
 
-                send(format_entry_message(p, portfolio))
                 append_jsonl(trades_log, {
                     "type": "entry",
                     "ts": now_ts,
@@ -557,14 +559,6 @@ def run() -> None:
                             "action": "exit_failed",
                             "ms": submit_ms,
                         })
-                        send(
-                            "[Fill Failed] "
-                            f"[{p.symbol} EXIT {p.side}] "
-                            f"[Reason: STOP_LOSS] "
-                            f"[Limit: {float(side_liquidity_px):.4f}] "
-                            f"[Contracts: {float(p.contracts):.4f}] "
-                            f"[Error: {err}]"
-                        )
                         append_jsonl(events_log, {
                             "type": "exit_failed",
                             "ts": now_ts,
@@ -584,15 +578,7 @@ def run() -> None:
                         "action": "exit",
                         "ms": submit_ms,
                     })
-                    send(
-                        "[Order Placed] "
-                        f"[{p.symbol} EXIT {p.side}] "
-                        f"[Reason: STOP_LOSS] "
-                        f"[Limit: {float(side_liquidity_px):.4f}] "
-                        f"[Contracts: {float(p.contracts):.4f}] "
-                        f"[Order ID: {closed.exit_order_id or 'n/a'}]"
-                    )
-                    send(format_exit_message(closed, portfolio))
+                    send_close_message(closed, m.slug, "STOP_LOSS")
                     append_jsonl(trades_log, {
                         "type": "exit",
                         "ts": now_ts,
@@ -612,7 +598,7 @@ def run() -> None:
             # Close position locally at resolved payout; claim/reconcile handles account cash updates.
             closed = portfolio.close_position(p.position_id, payout, now_ts)
 
-            send(format_exit_message(closed, portfolio))
+            send_close_message(closed, f"{p.symbol.lower()}-updown-5m-{p.market_ts}", "SETTLEMENT")
             append_jsonl(trades_log, {
                 "type": "exit",
                 "ts": now_ts,
