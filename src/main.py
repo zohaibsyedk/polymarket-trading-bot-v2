@@ -284,13 +284,14 @@ def run() -> None:
             "symbols": list(active.keys()),
         })
 
-        # Deadline-aware hot path: skip non-critical command polling if tick budget is already exceeded.
+        # No Telegram processing in hot window; outside hot window apply deadline-aware skip.
         tick_elapsed_ms = (time.perf_counter() - tick_t0) * 1000.0
-        skip_commands_this_tick = in_hot_window and tick_elapsed_ms > cfg.hot_tick_budget_ms
+        skip_commands_this_tick = in_hot_window or (tick_elapsed_ms > cfg.hot_tick_budget_ms)
         if skip_commands_this_tick:
             append_jsonl(events_log, {
-                "type": "tick_deadline_skip_commands",
+                "type": "telegram_processing_skipped",
                 "ts": now_ts,
+                "in_hot_window": in_hot_window,
                 "elapsed_ms": round(tick_elapsed_ms, 2),
                 "budget_ms": cfg.hot_tick_budget_ms,
             })
