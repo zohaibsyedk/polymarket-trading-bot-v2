@@ -8,6 +8,8 @@ class BotConfig:
     starting_cash: float = float(os.getenv("PMB2_STARTING_CASH", "1000"))
     poll_seconds: float = float(os.getenv("PMB2_POLL_SECONDS", "2"))
     hot_poll_seconds: float = float(os.getenv("PMB2_HOT_POLL_SECONDS", "1.0"))
+    hot_tick_budget_ms: float = float(os.getenv("PMB2_HOT_TICK_BUDGET_MS", "300"))
+    hot_min_logging: bool = os.getenv("PMB2_HOT_MIN_LOGGING", "1") == "1"
 
     market_interval_seconds: int = 300
     final_entry_window_seconds: int = 50

@@ -1,5 +1,6 @@
 import os
 import time
+from collections import deque
 from .config import BotConfig
 from .market_discovery import current_5m_window
 from .paper_engine import PortfolioState
@@ -48,6 +49,13 @@ def run() -> None:
     )
     market_feed.start()
 
+    def _percentile(values: deque[float], p: float) -> float:
+        if not values:
+            return 0.0
+        arr = sorted(values)
+        idx = int(max(0, min(len(arr) - 1, round((p / 100.0) * (len(arr) - 1)))))
+        return float(arr[idx])
+
     def send(msg: str):
         print("\n--- BOT MESSAGE ---\n" + msg + "\n--- END ---\n")
         # Defer non-critical Telegram sends during hot window to reduce latency jitter.
@@ -66,6 +74,11 @@ def run() -> None:
     in_hot_window = False
     deferred_telegram_msgs: list[str] = []
     last_entry_quote_sig: dict[tuple[str, int], tuple[float, float]] = {}
+
+    latency_market_fetch_ms: deque[float] = deque(maxlen=500)
+    latency_order_submit_ms: deque[float] = deque(maxlen=500)
+    latency_tick_ms: deque[float] = deque(maxlen=500)
+    last_latency_emit_ts = 0
 
     # Startup sync in live mode: seed bot cash/portfolio view from account state.
     if cfg.trading_mode == "live":
@@ -112,6 +125,7 @@ def run() -> None:
         )
 
     while not stop_requested:
+        tick_t0 = time.perf_counter()
         now_ts = int(time.time())
         window = current_5m_window(now_ts)
         sec_in_market = now_ts % cfg.market_interval_seconds
@@ -240,15 +254,28 @@ def run() -> None:
         # resolve market map first so command `Market` has current links
         fetch_t0 = time.perf_counter()
         active = market_feed.snapshot()
+        fetch_ms = round((time.perf_counter() - fetch_t0) * 1000, 2)
+        latency_market_fetch_ms.append(float(fetch_ms))
         append_jsonl(events_log, {
             "type": "latency_market_fetch",
             "ts": now_ts,
-            "ms": round((time.perf_counter() - fetch_t0) * 1000, 2),
+            "ms": fetch_ms,
             "symbols": list(active.keys()),
         })
 
+        # Deadline-aware hot path: skip non-critical command polling if tick budget is already exceeded.
+        tick_elapsed_ms = (time.perf_counter() - tick_t0) * 1000.0
+        skip_commands_this_tick = in_hot_window and tick_elapsed_ms > cfg.hot_tick_budget_ms
+        if skip_commands_this_tick:
+            append_jsonl(events_log, {
+                "type": "tick_deadline_skip_commands",
+                "ts": now_ts,
+                "elapsed_ms": round(tick_elapsed_ms, 2),
+                "budget_ms": cfg.hot_tick_budget_ms,
+            })
+
         # Telegram command polling
-        for chat_id, text in tg.poll_commands():
+        for chat_id, text in ([] if skip_commands_this_tick else tg.poll_commands()):
             if cfg.telegram_chat_id and chat_id != cfg.telegram_chat_id:
                 continue
             resp, should_stop, control_action = handle_command(
@@ -292,8 +319,13 @@ def run() -> None:
             if symbol not in active:
                 append_jsonl(events_log, {"type": "market_missing", "ts": now_ts, "symbol": symbol, "bucket": window.ts_bucket})
 
-        # ENTRY decisions only on current active markets
-        for symbol, market in active.items():
+        # ENTRY decisions only on current active markets (highest trigger confidence first)
+        ordered_active = sorted(
+            active.items(),
+            key=lambda kv: max(float(kv[1].entry_up_price), float(kv[1].entry_down_price)),
+            reverse=True,
+        )
+        for symbol, market in ordered_active:
             if trading_paused_by_reconcile or manual_entries_paused:
                 append_jsonl(events_log, {
                     "type": "entry_blocked_pause",
@@ -334,7 +366,7 @@ def run() -> None:
             )
 
             # Prebuild hint when quote is near trigger to reduce work at decision edge.
-            if max(quote.up_price, quote.down_price) >= (cfg.entry_min_price_threshold - 0.05):
+            if (not (in_hot_window and cfg.hot_min_logging)) and max(quote.up_price, quote.down_price) >= (cfg.entry_min_price_threshold - 0.05):
                 append_jsonl(events_log, {
                     "type": "entry_prebuild_hint",
                     "ts": now_ts,
@@ -357,24 +389,25 @@ def run() -> None:
             last_entry_quote_sig[qkey] = qsig
 
             entry = evaluate_entry(cfg, quote, elapsed, portfolio.cash_available)
-            append_jsonl(events_log, {
-                "type": "entry_check",
-                "ts": now_ts,
-                "symbol": symbol,
-                "market_ts": market.market_ts,
-                "slug": market.slug,
-                "elapsed": elapsed,
-                "cash_available": portfolio.cash_available,
-                "up_trigger_price": quote.up_price,
-                "down_trigger_price": quote.down_price,
-                "decision": {
-                    "should_enter": entry.should_enter,
-                    "reason": entry.reason,
-                    "side": entry.side,
-                    "price": entry.price,
-                    "size_usd": entry.size_usd,
-                },
-            })
+            if not (in_hot_window and cfg.hot_min_logging):
+                append_jsonl(events_log, {
+                    "type": "entry_check",
+                    "ts": now_ts,
+                    "symbol": symbol,
+                    "market_ts": market.market_ts,
+                    "slug": market.slug,
+                    "elapsed": elapsed,
+                    "cash_available": portfolio.cash_available,
+                    "up_trigger_price": quote.up_price,
+                    "down_trigger_price": quote.down_price,
+                    "decision": {
+                        "should_enter": entry.should_enter,
+                        "reason": entry.reason,
+                        "side": entry.side,
+                        "price": entry.price,
+                        "size_usd": entry.size_usd,
+                    },
+                })
             if entry.should_enter and entry.side and entry.price and entry.size_usd:
                 if float(entry.price) < cfg.min_buy_trigger_price:
                     append_jsonl(events_log, {
@@ -413,13 +446,15 @@ def run() -> None:
                     )
                 except Exception as e:
                     err = str(e)
+                    submit_ms = round((time.perf_counter() - submit_t0) * 1000, 2)
+                    latency_order_submit_ms.append(float(submit_ms))
                     append_jsonl(events_log, {
                         "type": "latency_order_submit",
                         "ts": now_ts,
                         "symbol": symbol,
                         "market_ts": market.market_ts,
                         "action": "entry_failed",
-                        "ms": round((time.perf_counter() - submit_t0) * 1000, 2),
+                        "ms": submit_ms,
                     })
                     send(
                         "[Fill Failed] "
@@ -439,13 +474,15 @@ def run() -> None:
                     })
                     continue
 
+                submit_ms = round((time.perf_counter() - submit_t0) * 1000, 2)
+                latency_order_submit_ms.append(float(submit_ms))
                 append_jsonl(events_log, {
                     "type": "latency_order_submit",
                     "ts": now_ts,
                     "symbol": symbol,
                     "market_ts": market.market_ts,
                     "action": "entry",
-                    "ms": round((time.perf_counter() - submit_t0) * 1000, 2),
+                    "ms": submit_ms,
                 })
 
                 send(
@@ -505,13 +542,15 @@ def run() -> None:
                         )
                     except Exception as e:
                         err = str(e)
+                        submit_ms = round((time.perf_counter() - exit_t0) * 1000, 2)
+                        latency_order_submit_ms.append(float(submit_ms))
                         append_jsonl(events_log, {
                             "type": "latency_order_submit",
                             "ts": now_ts,
                             "symbol": p.symbol,
                             "market_ts": p.market_ts,
                             "action": "exit_failed",
-                            "ms": round((time.perf_counter() - exit_t0) * 1000, 2),
+                            "ms": submit_ms,
                         })
                         send(
                             "[Fill Failed] "
@@ -530,13 +569,15 @@ def run() -> None:
                         })
                         continue
 
+                    submit_ms = round((time.perf_counter() - exit_t0) * 1000, 2)
+                    latency_order_submit_ms.append(float(submit_ms))
                     append_jsonl(events_log, {
                         "type": "latency_order_submit",
                         "ts": now_ts,
                         "symbol": p.symbol,
                         "market_ts": p.market_ts,
                         "action": "exit",
-                        "ms": round((time.perf_counter() - exit_t0) * 1000, 2),
+                        "ms": submit_ms,
                     })
                     send(
                         "[Order Placed] "
@@ -598,6 +639,22 @@ def run() -> None:
             "active": {k: {"ts": v.market_ts, "slug": v.slug, "up": v.up_price, "down": v.down_price, "entry_up": v.entry_up_price, "entry_down": v.entry_down_price, "bid_up": v.bid_up_price, "ask_up": v.ask_up_price, "bid_down": v.bid_down_price, "ask_down": v.ask_down_price} for k, v in active.items()},
             "open_positions": len(portfolio.open_positions),
         })
+
+        tick_ms = round((time.perf_counter() - tick_t0) * 1000, 2)
+        latency_tick_ms.append(float(tick_ms))
+
+        if (now_ts - last_latency_emit_ts) >= 30:
+            last_latency_emit_ts = now_ts
+            append_jsonl(events_log, {
+                "type": "latency_summary",
+                "ts": now_ts,
+                "market_fetch_p50_ms": round(_percentile(latency_market_fetch_ms, 50), 2),
+                "market_fetch_p95_ms": round(_percentile(latency_market_fetch_ms, 95), 2),
+                "order_submit_p50_ms": round(_percentile(latency_order_submit_ms, 50), 2),
+                "order_submit_p95_ms": round(_percentile(latency_order_submit_ms, 95), 2),
+                "tick_p50_ms": round(_percentile(latency_tick_ms, 50), 2),
+                "tick_p95_ms": round(_percentile(latency_tick_ms, 95), 2),
+            })
 
         # Flush deferred Telegram sends when we leave the hot window.
         if not in_hot_window and deferred_telegram_msgs:

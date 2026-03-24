@@ -3,7 +3,18 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Optional
 
-UA = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+UA = {
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "application/json",
+    "Connection": "keep-alive",
+}
+_OPENER = urllib.request.build_opener()
+
+
+def _http_get_json(url: str, timeout: float):
+    req = urllib.request.Request(url, headers=UA)
+    with _OPENER.open(req, timeout=timeout) as r:
+        return json.loads(r.read().decode())
 GAMMA_BASE = "https://gamma-api.polymarket.com/markets?slug="
 CLOB_BASE = "https://clob.polymarket.com"
 
@@ -29,9 +40,7 @@ class ResolvedMarket:
 
 def _fetch_slug(slug: str) -> Optional[dict]:
     try:
-        req = urllib.request.Request(GAMMA_BASE + slug, headers=UA)
-        with urllib.request.urlopen(req, timeout=3) as r:
-            d = json.loads(r.read().decode())
+        d = _http_get_json(GAMMA_BASE + slug, timeout=3)
         return d[0] if d else None
     except Exception:
         return None
@@ -53,9 +62,7 @@ def _parse_prices(v) -> tuple[Optional[float], Optional[float]]:
 
 def _best_ask_for_token(token_id: str) -> Optional[float]:
     try:
-        req = urllib.request.Request(f"{CLOB_BASE}/book?token_id={token_id}", headers=UA)
-        with urllib.request.urlopen(req, timeout=2) as r:
-            d = json.loads(r.read().decode())
+        d = _http_get_json(f"{CLOB_BASE}/book?token_id={token_id}", timeout=2)
         asks = d.get("asks") or []
         if not asks:
             return None
@@ -66,9 +73,7 @@ def _best_ask_for_token(token_id: str) -> Optional[float]:
 
 def _best_bid_for_token(token_id: str) -> Optional[float]:
     try:
-        req = urllib.request.Request(f"{CLOB_BASE}/book?token_id={token_id}", headers=UA)
-        with urllib.request.urlopen(req, timeout=2) as r:
-            d = json.loads(r.read().decode())
+        d = _http_get_json(f"{CLOB_BASE}/book?token_id={token_id}", timeout=2)
         bids = d.get("bids") or []
         if not bids:
             return None
@@ -80,12 +85,7 @@ def _best_bid_for_token(token_id: str) -> Optional[float]:
 def _market_price_for_token(token_id: str, side: str) -> Optional[float]:
     """Use CLOB Get Market Price endpoint (/price). side in {BUY, SELL}."""
     try:
-        req = urllib.request.Request(
-            f"{CLOB_BASE}/price?token_id={token_id}&side={side}",
-            headers=UA,
-        )
-        with urllib.request.urlopen(req, timeout=2) as r:
-            d = json.loads(r.read().decode())
+        d = _http_get_json(f"{CLOB_BASE}/price?token_id={token_id}&side={side}", timeout=2)
         px = d.get("price")
         if px is None:
             return None

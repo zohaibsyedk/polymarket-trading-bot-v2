@@ -36,4 +36,9 @@ echo "[run.sh] RUN_ID=$RUN_ID"
 echo "[run.sh] logs -> $PMB2_LOGS_DIR"
 echo "[run.sh] state -> $PMB2_STATE_DIR"
 
-python3 -m src.main
+# Optional scheduler priority tweaks for lower local jitter.
+if command -v ionice >/dev/null 2>&1; then
+  ionice -c2 -n0 nice -n 0 python3 -m src.main
+else
+  nice -n 0 python3 -m src.main
+fi

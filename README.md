@@ -121,7 +121,8 @@ Manual entry control via Telegram:
 - `Market` → current BTC/ETH market links
 - `Snapshot` → current UP/DOWN prices
 - Order notifications: Telegram messages on order placement attempts and explicit fill failures
-- Latency metrics in events log (`latency_market_fetch`, `latency_order_submit`)
+- Latency metrics in events log (`latency_market_fetch`, `latency_order_submit`, `latency_summary` with p50/p95)
+- Hot-window latency guards: deferred non-critical Telegram sends, unchanged-quote skip, deadline-aware command polling skip
 - `Poly` → live account summary:
   - Available cash
   - Portfolio value
