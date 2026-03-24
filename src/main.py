@@ -433,7 +433,8 @@ def run() -> None:
                     continue
                 token_id = market.up_token_id if entry.side == "UP" else market.down_token_id
                 # Buy-cap offset lets us pay above trigger price to improve FAK match odds.
-                effective_limit_price = min(0.9999, float(entry.price) + float(cfg.buy_cap_offset))
+                # Keep below exchange max bound (<= 0.99 for current tick-size rules).
+                effective_limit_price = min(0.99, float(entry.price) + float(cfg.buy_cap_offset))
                 submit_t0 = time.perf_counter()
                 try:
                     p = engine.enter_position(
